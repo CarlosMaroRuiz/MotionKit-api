@@ -1,0 +1,39 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id        String      @id @default(uuid())
+  email     String      @unique
+  pass      String
+  donations Donation[]
+  components Component[]
+}
+
+model Component {
+  id          String     @id @default(uuid())
+  name        String
+  html        String
+  userId      String
+  user        User       @relation(fields: [userId], references: [id])
+  donations   Donation[]
+}
+
+model Donation {
+  id          String   @id @default(uuid())
+  amount      Float
+  userId      String
+  componentId String
+  user        User     @relation(fields: [userId], references: [id])
+  component   Component @relation(fields: [componentId], references: [id])
+
+  @@unique([userId, componentId]) // Un usuario solo puede tener una donación por componente
+}

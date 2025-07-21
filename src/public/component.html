@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Component</title>
+</head>
+<body>
+    <h1 id="componentName"></h1>
+    <div id="content"></div>
+
+    <script>
+        const token = localStorage.getItem('token');
+        const componentId = new URLSearchParams(window.location.search).get('id');
+
+        async function loadComponent() {
+            if (!token) {
+                alert('Please log in to view this component.');
+                window.location.href = '/login.html';
+                return;
+            }
+
+            const response = await fetch(`/api/components/${componentId}`, {
+                headers: { 'token': token }
+            });
+            
+            const data = await response.json();
+            const contentDiv = document.getElementById('content');
+            
+            if (response.ok) {
+                document.getElementById('componentName').innerText = data.name;
+                contentDiv.innerHTML = `
+                    <h3>HTML Code:</h3>
+                    <pre><code>${data.html.replace(/</g, "<").replace(/>/g, ">")}</code></pre>
+                `;
+            } else {
+                 document.getElementById('componentName').innerText = data.component.name;
+                 contentDiv.innerHTML = `
+                    <p>${data.message}</p>
+                    <h3>Donate to unlock</h3>
+                    <form id="donateForm">
+                        <input type="number" id="amount" placeholder="Amount in USD" step="0.01" required>
+                        <button type="submit">Donate with PayPal</button>
+                    </form>
+                 `;
+                 document.getElementById('donateForm').addEventListener('submit', handleDonation);
+            }
+        }
+
+        async function handleDonation(e) {
+            e.preventDefault();
+            const amount = document.getElementById('amount').value;
+            const response = await fetch('/api/payment/create-order', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'token': token },
+                body: JSON.stringify({ amount, componentId })
+            });
+            const data = await response.json();
+            window.location.href = data.links[1].href;
+        }
+
+        loadComponent();
+    </script>
+</body>
+</html>

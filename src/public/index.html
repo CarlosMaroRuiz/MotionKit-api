@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Components</title>
+</head>
+<body>
+    <h1>Components</h1>
+    <div id="components-list"></div>
+    <hr>
+    <h2>Create new Component (requires login)</h2>
+    <form id="createComponentForm">
+        <input type="text" id="name" placeholder="Component Name" required>
+        <textarea id="html" placeholder="HTML Code" required></textarea>
+        <button type="submit">Create</button>
+    </form>
+
+    <script>
+        const token = localStorage.getItem('token');
+
+        async function loadComponents() {
+            const response = await fetch('/api/components');
+            const components = await response.json();
+            const list = document.getElementById('components-list');
+            list.innerHTML = components.map(c => `
+                <div>
+                    <h2>${c.name}</h2>
+                    <a href="/component.html?id=${c.id}">View Details & Donate</a>
+                </div>
+            `).join('');
+        }
+        
+        document.getElementById('createComponentForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!token) {
+                alert('You must be logged in to create a component');
+                window.location.href = '/login.html';
+                return;
+            }
+            const name = document.getElementById('name').value;
+            const html = document.getElementById('html').value;
+            await fetch('/api/components', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'token': token },
+                body: JSON.stringify({ name, html })
+            });
+            loadComponents();
+        });
+
+        loadComponents();
+    </script>
+</body>
+</html>
