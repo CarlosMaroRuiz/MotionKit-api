@@ -1,78 +1,81 @@
-import { response } from "express";
-import {
-  HOST,
-  PAYPAL_API_URL,
-  PAYPAL_API_CLIENT,
-  PAYPAL_API_SECRET,
-} from "../config.js";
-import axios from "axios";
+import { PrismaClient } from '@prisma/client';
+import { HOST, PAYPAL_API_URL, PAYPAL_API_CLIENT, PAYPAL_API_SECRET } from '../config.js';
+import axios from 'axios';
+
+const prisma = new PrismaClient();
 
 export const createOrder = async (req, res) => {
-  const order = {
-    intent: "CAPTURE",
-    purchase_units: [
-      {
-        amount: {
-          currency_code: "USD",
-          value: "9.99",
-        },
-      },
-    ],
-    application_context: {
-      brand_name: "Mi tienda",
-      landing_page: "NO_PREFERENCE",
-      user_action: "PAY_NOW",
-      return_url: `${HOST}/payment/capture-order`,
-      cancel_url: `${HOST}/payment/cancel-order`,
-    },
-  };
+    const { amount, componentId } = req.body;
 
-  const params = new URLSearchParams();
-  params.append("grant_type", "client_credentials");
-
-  const {
-    data: { access_token },
-  } = await axios.post(`${PAYPAL_API_URL}/v1/oauth2/token`, params, {
-    auth: {
-      username: PAYPAL_API_CLIENT,
-      password: PAYPAL_API_SECRET,
-    },
-  });
-
-  const orderdata = await axios.post(
-    `${PAYPAL_API_URL}/v2/checkout/orders`,
-    order,
-    {
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${access_token}`,
-      },
+    if (parseFloat(amount) <= 0) {
+        return res.status(400).json({ message: 'Donation amount must be greater than 0.' });
     }
-  );
 
-  console.log(orderdata.data);
+    const order = {
+        intent: 'CAPTURE',
+        purchase_units: [{
+            amount: {
+                currency_code: 'USD',
+                value: parseFloat(amount).toFixed(2),
+            },
+        }],
+        application_context: {
+            brand_name: 'Component Store',
+            landing_page: 'NO_PREFERENCE',
+            user_action: 'PAY_NOW',
+            // Pasamos los datos que necesitaremos después en la URL de retorno
+            return_url: `${HOST}/api/payment/capture-order?componentId=${componentId}&userId=${req.user.id}&amount=${amount}`,
+            cancel_url: `${HOST}/api/payment/cancel-order`,
+        },
+    };
 
-  return res.json(orderdata.data);
+    const params = new URLSearchParams();
+    params.append('grant_type', 'client_credentials');
+
+    try {
+        const { data: { access_token } } = await axios.post(`${PAYPAL_API_URL}/v1/oauth2/token`, params, {
+            auth: { username: PAYPAL_API_CLIENT, password: PAYPAL_API_SECRET },
+        });
+
+        const orderResponse = await axios.post(`${PAYPAL_API_URL}/v2/checkout/orders`, order, {
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${access_token}`,
+            },
+        });
+        
+        res.json(orderResponse.data);
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Error creating PayPal order" });
+    }
 };
 
+export const captureOrder = async (req, res) => {
+    const { token, componentId, userId, amount } = req.query;
 
-export const captureOrder = async(req, res = response) => {
+    try {
+        await axios.post(`${PAYPAL_API_URL}/v2/checkout/orders/${token}/capture`, {}, {
+            auth: { username: PAYPAL_API_CLIENT, password: PAYPAL_API_SECRET },
+        });
 
-  const {token} = req.query
+        // Guardar la donación en la base de datos
+        await prisma.donation.create({
+            data: {
+                amount: parseFloat(amount),
+                userId,
+                componentId,
+            },
+        });
 
-  const orderdata = await axios.post(`${PAYPAL_API_URL}/v2/checkout/orders/${token}/capture`, {}, {
-    auth: {
-      username: PAYPAL_API_CLIENT,
-      password: PAYPAL_API_SECRET,
-    },
-  })
+        // Redirigir a una página de éxito
+        res.redirect('/payment-success.html');
 
-  console.log(orderdata.data);
-  
-
-
-  return res.send('pagado')
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Error capturing PayPal order" });
+    }
 };
 
-
-export const cancelOrder = (req, res = response) => res.redirect('/')
+export const cancelOrder = (req, res) => res.redirect('/');
