@@ -14,8 +14,7 @@ export const createComponent = async (req, res) => {
     const newComponent = await prisma.component.create({
         data: {
             name,
-            html,
-            userId: req.user.id,
+            html
         },
     });
     res.json(newComponent);

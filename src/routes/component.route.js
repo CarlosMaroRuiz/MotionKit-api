@@ -57,7 +57,7 @@ router.get('/', getComponents);
  *       401:
  *         description: Unauthorized (token is missing or invalid)
  */
-router.post('/', authRequired, createComponent);
+router.post('/', createComponent);
 
 /**
  * @swagger
@@ -93,6 +93,6 @@ router.post('/', authRequired, createComponent);
  *       401:
  *         description: Unauthorized
  */
-router.get('/:id', authRequired, getComponent);
+router.get('/:id', getComponent);
 
 export default router;

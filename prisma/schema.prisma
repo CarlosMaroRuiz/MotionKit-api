@@ -15,15 +15,12 @@ model User {
   email     String      @unique
   pass      String
   donations Donation[]
-  components Component[]
 }
 
 model Component {
   id          String     @id @default(uuid())
   name        String
   html        String
-  userId      String
-  user        User       @relation(fields: [userId], references: [id])
   donations   Donation[]
 }
 
