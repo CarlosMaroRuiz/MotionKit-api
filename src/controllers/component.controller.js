@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import jwt from 'jsonwebtoken';
 
 const prisma = new PrismaClient();
 
@@ -29,20 +30,62 @@ const getFreeAccessibleComponents = async () => {
 export const getComponents = async (req, res) => {
     try {
         const { type } = req.query;
+        const token = req.headers.token;
         
         const whereClause = type ? { type } : {};
         
+        // Obtener todos los componentes con datos completos
         const components = await prisma.component.findMany({
             where: whereClause,
             select: { 
                 id: true, 
                 name: true, 
                 type: true,
-                animationCode: true // ✅ Corregido: removido el objeto anidado
+                jsxCode: true,
+                animationCode: true
             }
         });
         
-        res.json(components);
+        // Si no hay token, devolver componentes con código oculto
+        if (!token) {
+            const publicComponents = components.map(component => ({
+                ...component,
+                jsxCode: null,
+                animationCode: null
+            }));
+            return res.json(publicComponents);
+        }
+        
+        // Verificar el usuario y su estado premium
+        try {
+            const decoded = jwt.verify(token, 'secret123');
+            const userId = decoded.id;
+            
+            // Verificar si tiene acceso premium
+            const hasPremiumAccess = await hasUserPremiumAccess(userId);
+            
+            if (hasPremiumAccess) {
+                // Usuario premium: devolver componentes completos
+                return res.json(components);
+            } else {
+                // Usuario no premium: ocultar código
+                const limitedComponents = components.map(component => ({
+                    ...component,
+                    jsxCode: null,
+                    animationCode: null
+                }));
+                return res.json(limitedComponents);
+            }
+        } catch (tokenError) {
+            // Token inválido: devolver componentes con código oculto
+            const publicComponents = components.map(component => ({
+                ...component,
+                jsxCode: null,
+                animationCode: null
+            }));
+            return res.json(publicComponents);
+        }
+        
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
@@ -51,22 +94,64 @@ export const getComponents = async (req, res) => {
 export const getComponentsByType = async (req, res) => {
     try {
         const { type } = req.params;
+        const token = req.headers.token;
         
         if (!type) {
             return res.status(400).json({ message: 'Type parameter is required' });
         }
         
+        // Obtener todos los componentes del tipo especificado con datos completos
         const components = await prisma.component.findMany({
             where: { type },
             select: { 
                 id: true, 
                 name: true, 
                 type: true,
-                animationCode: true // ✅ Corregido: removido el objeto anidado
+                jsxCode: true,
+                animationCode: true
             }
         });
         
-        res.json(components);
+        // Si no hay token, devolver componentes con código oculto
+        if (!token) {
+            const publicComponents = components.map(component => ({
+                ...component,
+                jsxCode: null,
+                animationCode: null
+            }));
+            return res.json(publicComponents);
+        }
+        
+        // Verificar el usuario y su estado premium
+        try {
+            const decoded = jwt.verify(token, 'secret123');
+            const userId = decoded.id;
+            
+            // Verificar si tiene acceso premium
+            const hasPremiumAccess = await hasUserPremiumAccess(userId);
+            
+            if (hasPremiumAccess) {
+                // Usuario premium: devolver componentes completos
+                return res.json(components);
+            } else {
+                // Usuario no premium: ocultar código
+                const limitedComponents = components.map(component => ({
+                    ...component,
+                    jsxCode: null,
+                    animationCode: null
+                }));
+                return res.json(limitedComponents);
+            }
+        } catch (tokenError) {
+            // Token inválido: devolver componentes con código oculto
+            const publicComponents = components.map(component => ({
+                ...component,
+                jsxCode: null,
+                animationCode: null
+            }));
+            return res.json(publicComponents);
+        }
+        
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
@@ -199,33 +284,8 @@ export const getUserAccessInfo = async (req, res) => {
         const totalAmount = totalDonations._sum.amount || 0;
         const hasPremiumAccess = totalAmount >= PREMIUM_THRESHOLD;
         
-        // Obtener componentes accesibles
-        let accessibleComponents = [];
-        
-        if (hasPremiumAccess) {
-            // Usuario premium: todos los componentes
-            const allComponents = await prisma.component.findMany({
-                select: { id: true, name: true, type: true }
-            });
-            accessibleComponents = allComponents.map(c => c.id);
-        } else {
-            // Usuario gratuito: componentes limitados + donaciones específicas
-            const freeComponents = await getFreeAccessibleComponents();
-            
-            // ✅ Simplificado: obtener TODAS las donaciones del usuario y filtrar después
-            const userDonations = await prisma.donation.findMany({
-                where: { userId },
-                select: { componentId: true }
-            });
-            
-            // Filtrar componentes donados (excluyendo 'premium-access' si existe)
-            const paidComponentIds = userDonations
-                .map(d => d.componentId)
-                .filter(id => id && id !== 'premium-access'); // Excluir premium-access virtual
-            
-            // Combinar componentes gratuitos + donados (removiendo duplicados)
-            accessibleComponents = [...new Set([...freeComponents, ...paidComponentIds])];
-        }
+        // Obtener total de componentes disponibles
+        const totalComponents = await prisma.component.count();
         
         res.json({
             user: {
@@ -236,8 +296,9 @@ export const getUserAccessInfo = async (req, res) => {
                 freeAccessLimit: FREE_ACCESS_LIMIT
             },
             access: {
-                totalAccessibleComponents: accessibleComponents.length,
-                accessibleComponentIds: accessibleComponents
+                hasFullAccess: hasPremiumAccess,
+                totalComponentsAvailable: totalComponents,
+                accessLevel: hasPremiumAccess ? 'premium' : 'limited'
             }
         });
         
