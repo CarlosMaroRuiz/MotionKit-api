@@ -38,7 +38,7 @@ export const getComponents = async (req, res) => {
                 id: true, 
                 name: true, 
                 type: true,
-                animationCode: true ? { animationCode: true } : false
+                animationCode: true // ✅ Corregido: removido el objeto anidado
             }
         });
         
@@ -62,7 +62,7 @@ export const getComponentsByType = async (req, res) => {
                 id: true, 
                 name: true, 
                 type: true,
-                animationCode: true ? { animationCode: true } : false
+                animationCode: true // ✅ Corregido: removido el objeto anidado
             }
         });
         
@@ -211,15 +211,20 @@ export const getUserAccessInfo = async (req, res) => {
         } else {
             // Usuario gratuito: componentes limitados + donaciones específicas
             const freeComponents = await getFreeAccessibleComponents();
-            const paidComponents = await prisma.donation.findMany({
-                where: { userId, componentId: { not: null } },
+            
+            // ✅ Simplificado: obtener TODAS las donaciones del usuario y filtrar después
+            const userDonations = await prisma.donation.findMany({
+                where: { userId },
                 select: { componentId: true }
             });
             
-            accessibleComponents = [
-                ...freeComponents,
-                ...paidComponents.map(d => d.componentId)
-            ];
+            // Filtrar componentes donados (excluyendo 'premium-access' si existe)
+            const paidComponentIds = userDonations
+                .map(d => d.componentId)
+                .filter(id => id && id !== 'premium-access'); // Excluir premium-access virtual
+            
+            // Combinar componentes gratuitos + donados (removiendo duplicados)
+            accessibleComponents = [...new Set([...freeComponents, ...paidComponentIds])];
         }
         
         res.json({
