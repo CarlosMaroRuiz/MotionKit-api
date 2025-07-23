@@ -9,9 +9,9 @@ CREATE TABLE "User" (
 CREATE TABLE "Component" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "name" TEXT NOT NULL,
-    "html" TEXT NOT NULL,
-    "userId" TEXT NOT NULL,
-    CONSTRAINT "Component_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+    "jsxCode" TEXT NOT NULL,
+    "type" TEXT NOT NULL,
+    "animationCode" TEXT
 );
 
 -- CreateTable

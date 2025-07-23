@@ -18,10 +18,12 @@ model User {
 }
 
 model Component {
-  id          String     @id @default(uuid())
-  name        String
-  html        String
-  donations   Donation[]
+  id            String     @id @default(uuid())
+  name          String
+  jsxCode       String     // Renombrado de html a jsxCode
+  type          String     // Nuevo campo para tipo de componente
+  animationCode String?    // Nuevo campo para código de animación (opcional)
+  donations     Donation[]
 }
 
 model Donation {

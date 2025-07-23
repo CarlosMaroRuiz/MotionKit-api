@@ -1,15 +1,175 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>Component</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Component Details</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .component-header {
+            border-bottom: 2px solid #e0e0e0;
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+        }
+        .component-type {
+            background: #007bff;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            display: inline-block;
+            margin-bottom: 10px;
+        }
+        .code-section {
+            background: #f8f9fa;
+            border-left: 4px solid #007bff;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        .code-section h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        pre {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+            line-height: 1.5;
+        }
+        .access-denied {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        .premium-info {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        .payment-options {
+            display: flex;
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+        .btn-success:hover {
+            background: #1e7e34;
+        }
+        .user-info {
+            background: #e9ecef;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+        .premium-badge {
+            background: linear-gradient(45deg, #ffd700, #ffed4e);
+            color: #333;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-weight: bold;
+            display: inline-block;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+        }
+    </style>
 </head>
 <body>
-    <h1 id="componentName"></h1>
-    <div id="content"></div>
+    <div class="container">
+        <div class="loading" id="loading">
+            <h2>Loading component...</h2>
+        </div>
+
+        <div id="content" style="display: none;">
+            <div class="component-header">
+                <div class="component-type" id="componentType"></div>
+                <h1 id="componentName"></h1>
+            </div>
+
+            <div class="user-info" id="userInfo">
+                <h3>Your Access Status</h3>
+                <div id="userStatus"></div>
+            </div>
+
+            <div id="componentContent"></div>
+        </div>
+    </div>
 
     <script>
         const token = localStorage.getItem('token');
         const componentId = new URLSearchParams(window.location.search).get('id');
+        
+        let userAccessInfo = null;
+
+        async function loadUserAccessInfo() {
+            try {
+                const response = await fetch('/api/components/user/access-info', {
+                    headers: { 'token': token }
+                });
+                
+                if (response.ok) {
+                    userAccessInfo = await response.json();
+                    updateUserStatusDisplay();
+                }
+            } catch (error) {
+                console.error('Error loading user access info:', error);
+            }
+        }
+
+        function updateUserStatusDisplay() {
+            const userStatusDiv = document.getElementById('userStatus');
+            if (!userAccessInfo) return;
+
+            const { user } = userAccessInfo;
+            const statusHTML = `
+                <p><strong>Total Donated:</strong> $${user.totalDonated} ${user.currency}</p>
+                <p><strong>Status:</strong> ${user.isPremium ? '<span class="premium-badge">PREMIUM USER</span>' : 'Free User'}</p>
+                <p><strong>Accessible Components:</strong> ${userAccessInfo.access.totalAccessibleComponents}</p>
+                ${!user.isPremium ? `<p><strong>Upgrade to Premium:</strong> $${user.premiumThreshold - user.totalDonated} ${user.currency} remaining</p>` : ''}
+            `;
+            userStatusDiv.innerHTML = statusHTML;
+        }
 
         async function loadComponent() {
             if (!token) {
@@ -18,45 +178,182 @@
                 return;
             }
 
-            const response = await fetch(`/api/components/${componentId}`, {
-                headers: { 'token': token }
-            });
-            
-            const data = await response.json();
-            const contentDiv = document.getElementById('content');
-            
-            if (response.ok) {
-                document.getElementById('componentName').innerText = data.name;
-                contentDiv.innerHTML = `
-                    <h3>HTML Code:</h3>
-                    <pre><code>${data.html.replace(/</g, "<").replace(/>/g, ">")}</code></pre>
-                `;
-            } else {
-                 document.getElementById('componentName').innerText = data.component.name;
-                 contentDiv.innerHTML = `
-                    <p>${data.message}</p>
-                    <h3>Donate to unlock</h3>
-                    <form id="donateForm">
-                        <input type="number" id="amount" placeholder="Amount in USD" step="0.01" required>
-                        <button type="submit">Donate with PayPal</button>
-                    </form>
-                 `;
-                 document.getElementById('donateForm').addEventListener('submit', handleDonation);
+            if (!componentId) {
+                alert('Component ID is required.');
+                window.location.href = '/';
+                return;
+            }
+
+            try {
+                // Load user access info first
+                await loadUserAccessInfo();
+
+                const response = await fetch(`/api/components/${componentId}`, {
+                    headers: { 'token': token }
+                });
+                
+                const data = await response.json();
+                
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('content').style.display = 'block';
+                
+                if (response.ok) {
+                    // User has access to the component
+                    displayComponent(data);
+                } else if (response.status === 403) {
+                    // Access denied
+                    displayAccessDenied(data);
+                } else {
+                    throw new Error(data.message || 'Error loading component');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById('loading').innerHTML = `<h2>Error: ${error.message}</h2>`;
             }
         }
 
-        async function handleDonation(e) {
-            e.preventDefault();
-            const amount = document.getElementById('amount').value;
-            const response = await fetch('/api/payment/create-order', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'token': token },
-                body: JSON.stringify({ amount, componentId })
-            });
-            const data = await response.json();
-            window.location.href = data.links[1].href;
+        function displayComponent(component) {
+            document.getElementById('componentName').textContent = component.name;
+            document.getElementById('componentType').textContent = component.type.toUpperCase();
+            
+            const contentDiv = document.getElementById('componentContent');
+            
+            let html = `
+                <div class="code-section">
+                    <h3>JSX Code</h3>
+                    <pre><code>${escapeHtml(component.jsxCode)}</code></pre>
+                </div>
+            `;
+            
+            if (component.animationCode) {
+                html += `
+                    <div class="code-section">
+                        <h3>Animation Code</h3>
+                        <pre><code>${escapeHtml(component.animationCode)}</code></pre>
+                    </div>
+                `;
+            }
+            
+            contentDiv.innerHTML = html;
         }
 
+        function displayAccessDenied(data) {
+            document.getElementById('componentName').textContent = data.component.name;
+            document.getElementById('componentType').textContent = data.component.type.toUpperCase();
+            
+            const contentDiv = document.getElementById('componentContent');
+            
+            const isPremiumUser = userAccessInfo?.user?.isPremium || false;
+            const premiumNeeded = data.premiumInfo?.totalNeeded || 50;
+            const userTotal = userAccessInfo?.user?.totalDonated || 0;
+            const remainingForPremium = premiumNeeded - userTotal;
+            
+            contentDiv.innerHTML = `
+                <div class="access-denied">
+                    <h3>🔒 Access Denied</h3>
+                    <p>${data.message}</p>
+                </div>
+                
+                <div class="premium-info">
+                    <h3>💎 Unlock Options</h3>
+                    <div class="payment-options">
+                        ${!isPremiumUser ? `
+                            <div style="flex: 1;">
+                                <h4>Premium Upgrade ($${premiumNeeded} MXN)</h4>
+                                <p>Unlock entire catalog with ${data.premiumInfo.benefits}</p>
+                                <p><strong>You need: $${remainingForPremium} MXN more</strong></p>
+                                <button class="btn btn-success" onclick="upgradeToPremium(${remainingForPremium})">
+                                    Upgrade to Premium
+                                </button>
+                            </div>
+                        ` : ''}
+                        <div style="flex: 1;">
+                            <h4>Single Component Access</h4>
+                            <p>Pay any amount to unlock just this component</p>
+                            <form id="donateForm">
+                                <input type="number" id="amount" placeholder="Amount in MXN" step="0.01" min="1" required style="padding: 10px; margin-right: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                                <button type="submit" class="btn btn-primary">Donate & Unlock</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            document.getElementById('donateForm').addEventListener('submit', handleComponentDonation);
+        }
+
+        async function upgradeToPremium(amount) {
+            try {
+                const response = await fetch('/api/payment/create-order', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json', 
+                        'token': token 
+                    },
+                    body: JSON.stringify({ 
+                        amount: amount,
+                        isPremiumUpgrade: true
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    // Redirect to PayPal
+                    const approvalUrl = data.links.find(link => link.rel === 'approve').href;
+                    window.location.href = approvalUrl;
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            } catch (error) {
+                alert('Error creating premium upgrade order: ' + error.message);
+            }
+        }
+
+        async function handleComponentDonation(e) {
+            e.preventDefault();
+            const amount = document.getElementById('amount').value;
+            
+            if (!amount || parseFloat(amount) <= 0) {
+                alert('Please enter a valid amount');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/payment/create-order', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json', 
+                        'token': token 
+                    },
+                    body: JSON.stringify({ 
+                        amount: parseFloat(amount), 
+                        componentId: componentId,
+                        isPremiumUpgrade: false
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    // Redirect to PayPal
+                    const approvalUrl = data.links.find(link => link.rel === 'approve').href;
+                    window.location.href = approvalUrl;
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            } catch (error) {
+                alert('Error creating donation order: ' + error.message);
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Load component on page load
         loadComponent();
     </script>
 </body>

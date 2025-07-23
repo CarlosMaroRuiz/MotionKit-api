@@ -1,52 +1,489 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>Components</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Component Store</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 10px;
+        }
+        .user-dashboard {
+            background: white;
+            padding: 25px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .premium-badge {
+            background: linear-gradient(45deg, #ffd700, #ffed4e);
+            color: #333;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-weight: bold;
+            display: inline-block;
+        }
+        .filters {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .component-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .component-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+            cursor: pointer;
+        }
+        .component-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+        }
+        .component-type {
+            background: #007bff;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            display: inline-block;
+            margin-bottom: 10px;
+        }
+        .component-name {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #333;
+        }
+        .access-status {
+            font-size: 12px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        .access-granted {
+            background: #d4edda;
+            color: #155724;
+        }
+        .access-denied {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .create-form {
+            background: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #333;
+        }
+        .form-group input,
+        .form-group textarea,
+        .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .form-group textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+        .btn-success:hover {
+            background: #1e7e34;
+        }
+        .login-prompt {
+            text-align: center;
+            padding: 40px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+    </style>
 </head>
 <body>
-    <h1>Components</h1>
-    <div id="components-list"></div>
-    <hr>
-    <h2>Create new Component (requires login)</h2>
-    <form id="createComponentForm">
-        <input type="text" id="name" placeholder="Component Name" required>
-        <textarea id="html" placeholder="HTML Code" required></textarea>
-        <button type="submit">Create</button>
-    </form>
+    <div class="header">
+        <h1>🚀 Component Store</h1>
+        <p>Premium JSX Components with Animations</p>
+    </div>
+
+    <div class="loading" id="loading">
+        <h2>Loading...</h2>
+    </div>
+
+    <div id="main-content" style="display: none;">
+        <!-- User Dashboard -->
+        <div class="user-dashboard" id="userDashboard">
+            <h2>👤 Your Dashboard</h2>
+            <div id="userInfo">
+                <p>Loading user information...</p>
+            </div>
+            <div id="premiumUpgrade" style="display: none;">
+                <h3>💎 Upgrade to Premium</h3>
+                <p>Unlock the entire component catalog!</p>
+                <button class="btn btn-success" onclick="showPremiumUpgrade()">Upgrade Now</button>
+            </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="filters">
+            <h3>🔍 Filter Components</h3>
+            <div style="display: flex; gap: 15px; align-items: center;">
+                <select id="typeFilter" onchange="filterComponents()">
+                    <option value="">All Types</option>
+                </select>
+                <button class="btn btn-primary" onclick="loadComponents()">Refresh</button>
+            </div>
+        </div>
+
+        <!-- Components Grid -->
+        <div class="component-grid" id="components-list">
+            <!-- Components will be loaded here -->
+        </div>
+
+        <!-- Create Component Form -->
+        <div class="create-form">
+            <h2>➕ Create New Component</h2>
+            <p><em>Note: Login required to create components</em></p>
+            <form id="createComponentForm">
+                <div class="form-group">
+                    <label for="componentId">Custom ID (optional):</label>
+                    <input type="text" id="componentId" placeholder="Leave empty for auto-generated ID">
+                </div>
+                <div class="form-group">
+                    <label for="name">Component Name:</label>
+                    <input type="text" id="name" placeholder="e.g., Animated Button" required>
+                </div>
+                <div class="form-group">
+                    <label for="type">Component Type:</label>
+                    <select id="type" required>
+                        <option value="">Select a type...</option>
+                        <option value="button">Button</option>
+                        <option value="card">Card</option>
+                        <option value="modal">Modal</option>
+                        <option value="navigation">Navigation</option>
+                        <option value="form">Form</option>
+                        <option value="layout">Layout</option>
+                        <option value="animation">Animation</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="jsxCode">JSX Code:</label>
+                    <textarea id="jsxCode" placeholder="Enter your JSX component code here..." required></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="animationCode">Animation Code (optional):</label>
+                    <textarea id="animationCode" placeholder="CSS animations, Framer Motion, or other animation code..."></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary">Create Component</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="login-prompt" id="loginPrompt" style="display: none;">
+        <h2>🔐 Login Required</h2>
+        <p>Please log in to access the Component Store</p>
+        <a href="/login.html" class="btn btn-primary">Go to Login</a>
+    </div>
 
     <script>
         const token = localStorage.getItem('token');
+        let userAccessInfo = null;
+        let allComponents = [];
+
+        async function loadUserInfo() {
+            if (!token) return null;
+
+            try {
+                const response = await fetch('/api/components/user/access-info', {
+                    headers: { 'token': token }
+                });
+                
+                if (response.ok) {
+                    userAccessInfo = await response.json();
+                    updateUserDashboard();
+                    return userAccessInfo;
+                }
+            } catch (error) {
+                console.error('Error loading user info:', error);
+            }
+            return null;
+        }
+
+        function updateUserDashboard() {
+            const userInfoDiv = document.getElementById('userInfo');
+            const premiumUpgradeDiv = document.getElementById('premiumUpgrade');
+            
+            if (!userAccessInfo) {
+                userInfoDiv.innerHTML = '<p>Unable to load user information</p>';
+                return;
+            }
+
+            const { user, access } = userAccessInfo;
+            
+            userInfoDiv.innerHTML = `
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
+                    <div>
+                        <h4>💰 Total Donated</h4>
+                        <p style="font-size: 24px; margin: 0;">$${user.totalDonated} ${user.currency}</p>
+                    </div>
+                    <div>
+                        <h4>🎯 Status</h4>
+                        <p style="margin: 0;">${user.isPremium ? '<span class="premium-badge">PREMIUM USER</span>' : 'Free User'}</p>
+                    </div>
+                    <div>
+                        <h4>📦 Access</h4>
+                        <p style="margin: 0;">${access.totalAccessibleComponents} components</p>
+                    </div>
+                    ${!user.isPremium ? `
+                    <div>
+                        <h4>🔓 Upgrade</h4>
+                        <p style="margin: 0;">$${user.premiumThreshold - user.totalDonated} ${user.currency} remaining</p>
+                    </div>
+                    ` : ''}
+                </div>
+            `;
+
+            // Show premium upgrade if not premium
+            if (!user.isPremium) {
+                premiumUpgradeDiv.style.display = 'block';
+            }
+        }
 
         async function loadComponents() {
-            const response = await fetch('/api/components');
-            const components = await response.json();
-            const list = document.getElementById('components-list');
-            list.innerHTML = components.map(c => `
-                <div>
-                    <h2>${c.name}</h2>
-                    <a href="/component.html?id=${c.id}">View Details & Donate</a>
-                </div>
-            `).join('');
+            try {
+                const response = await fetch('/api/components');
+                allComponents = await response.json();
+                
+                // Update type filter options
+                updateTypeFilter();
+                
+                // Display components
+                displayComponents(allComponents);
+            } catch (error) {
+                console.error('Error loading components:', error);
+                document.getElementById('components-list').innerHTML = 
+                    '<div class="empty-state"><h3>Error loading components</h3></div>';
+            }
         }
-        
+
+        function updateTypeFilter() {
+            const typeFilter = document.getElementById('typeFilter');
+            const types = [...new Set(allComponents.map(c => c.type))].sort();
+            
+            // Clear existing options except "All Types"
+            typeFilter.innerHTML = '<option value="">All Types</option>';
+            
+            types.forEach(type => {
+                const option = document.createElement('option');
+                option.value = type;
+                option.textContent = type.charAt(0).toUpperCase() + type.slice(1);
+                typeFilter.appendChild(option);
+            });
+        }
+
+        function filterComponents() {
+            const selectedType = document.getElementById('typeFilter').value;
+            const filteredComponents = selectedType 
+                ? allComponents.filter(c => c.type === selectedType)
+                : allComponents;
+            
+            displayComponents(filteredComponents);
+        }
+
+        function displayComponents(components) {
+            const listDiv = document.getElementById('components-list');
+            
+            if (components.length === 0) {
+                listDiv.innerHTML = '<div class="empty-state"><h3>No components found</h3></div>';
+                return;
+            }
+
+            const accessibleIds = userAccessInfo?.access?.accessibleComponentIds || [];
+            
+            listDiv.innerHTML = components.map(component => {
+                const hasAccess = accessibleIds.includes(component.id);
+                const accessClass = hasAccess ? 'access-granted' : 'access-denied';
+                const accessText = hasAccess ? '✅ Accessible' : '🔒 Locked';
+                
+                return `
+                    <div class="component-card" onclick="viewComponent('${component.id}')">
+                        <div class="component-type">${component.type.toUpperCase()}</div>
+                        <div class="component-name">${component.name}</div>
+                        <div class="access-status ${accessClass}">${accessText}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function viewComponent(componentId) {
+            window.location.href = `/component.html?id=${componentId}`;
+        }
+
+        async function showPremiumUpgrade() {
+            if (!userAccessInfo) return;
+            
+            const remaining = userAccessInfo.user.premiumThreshold - userAccessInfo.user.totalDonated;
+            const confirmUpgrade = confirm(`Upgrade to Premium for ${remaining} MXN?\n\nBenefits:\n• Access to entire component catalog\n• All animation codes included\n• Priority support\n• Early access to new components`);
+            
+            if (confirmUpgrade) {
+                try {
+                    const response = await fetch('/api/payment/create-order', {
+                        method: 'POST',
+                        headers: { 
+                            'Content-Type': 'application/json', 
+                            'token': token 
+                        },
+                        body: JSON.stringify({ 
+                            amount: remaining,
+                            isPremiumUpgrade: true
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (response.ok) {
+                        const approvalUrl = data.links.find(link => link.rel === 'approve').href;
+                        window.location.href = approvalUrl;
+                    } else {
+                        alert('Error: ' + data.message);
+                    }
+                } catch (error) {
+                    alert('Error creating premium upgrade: ' + error.message);
+                }
+            }
+        }
+
         document.getElementById('createComponentForm').addEventListener('submit', async (e) => {
             e.preventDefault();
+            
             if (!token) {
                 alert('You must be logged in to create a component');
                 window.location.href = '/login.html';
                 return;
             }
-            const name = document.getElementById('name').value;
-            const html = document.getElementById('html').value;
-            await fetch('/api/components', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'token': token },
-                body: JSON.stringify({ name, html })
-            });
-            loadComponents();
+            
+            const formData = {
+                name: document.getElementById('name').value,
+                type: document.getElementById('type').value,
+                jsxCode: document.getElementById('jsxCode').value,
+                animationCode: document.getElementById('animationCode').value || null
+            };
+            
+            // Add custom ID if provided
+            const customId = document.getElementById('componentId').value.trim();
+            if (customId) {
+                formData.id = customId;
+            }
+            
+            try {
+                const response = await fetch('/api/components', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json', 
+                        'token': token 
+                    },
+                    body: JSON.stringify(formData)
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    alert('Component created successfully!');
+                    document.getElementById('createComponentForm').reset();
+                    loadComponents(); // Refresh component list
+                } else {
+                    alert('Error: ' + result.message);
+                }
+            } catch (error) {
+                alert('Error creating component: ' + error.message);
+            }
         });
 
-        loadComponents();
+        // Initialize the page
+        async function initializePage() {
+            document.getElementById('loading').style.display = 'block';
+            
+            if (!token) {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('loginPrompt').style.display = 'block';
+                return;
+            }
+            
+            try {
+                // Load user info and components in parallel
+                await Promise.all([
+                    loadUserInfo(),
+                    loadComponents()
+                ]);
+                
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('main-content').style.display = 'block';
+            } catch (error) {
+                console.error('Error initializing page:', error);
+                document.getElementById('loading').innerHTML = '<h2>Error loading page</h2>';
+            }
+        }
+
+        // Start initialization
+        initializePage();
     </script>
 </body>
 </html>

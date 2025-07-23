@@ -3,10 +3,213 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Payment</title>
+    <title>Payment Successful - Component Store</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .success-container {
+            background: white;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            text-align: center;
+            max-width: 600px;
+            width: 100%;
+        }
+        .success-icon {
+            font-size: 80px;
+            color: #28a745;
+            margin-bottom: 20px;
+        }
+        .success-title {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 32px;
+        }
+        .payment-details {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            text-align: left;
+        }
+        .premium-celebration {
+            background: linear-gradient(45deg, #ffd700, #ffed4e);
+            color: #333;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            font-weight: bold;
+        }
+        .btn {
+            padding: 15px 30px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            text-decoration: none;
+            display: inline-block;
+            margin: 10px;
+            transition: all 0.3s ease;
+        }
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #0056b3;
+            transform: translateY(-2px);
+        }
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+        .btn-success:hover {
+            background: #1e7e34;
+            transform: translateY(-2px);
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+        }
+    </style>
 </head>
 <body>
-    <h1>Tanks for your payment</h1>
-   
+    <div class="success-container">
+        <div class="loading" id="loading">
+            <h2>Processing payment information...</h2>
+        </div>
+
+        <div id="success-content" style="display: none;">
+            <div class="success-icon">🎉</div>
+            <h1 class="success-title">Payment Successful!</h1>
+            <p>Thank you for your contribution to the Component Store!</p>
+            
+            <div class="payment-details" id="paymentDetails">
+                <!-- Payment details will be populated here -->
+            </div>
+            
+            <div id="premiumCelebration" style="display: none;" class="premium-celebration">
+                <h3>🎊 Congratulations! You are now a PREMIUM user! 🎊</h3>
+                <p>You now have access to the entire component catalog!</p>
+            </div>
+            
+            <div style="margin-top: 30px;">
+                <a href="/" class="btn btn-primary">Browse Components</a>
+                <a href="/component.html" id="viewComponentBtn" class="btn btn-success" style="display: none;">View Unlocked Component</a>
+            </div>
+            
+            <div style="margin-top: 20px; font-size: 14px; color: #666;">
+                <p>📧 A confirmation email will be sent to your registered email address.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function getQueryParams() {
+            const params = new URLSearchParams(window.location.search);
+            return {
+                amount: params.get('amount'),
+                currency: params.get('currency') || 'MXN',
+                isPremium: params.get('isPremium') === 'true',
+                componentId: params.get('componentId'),
+                total: params.get('total')
+            };
+        }
+
+        function displaySuccessInfo() {
+            const params = getQueryParams();
+            
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('success-content').style.display = 'block';
+            
+            // Populate payment details
+            const paymentDetailsDiv = document.getElementById('paymentDetails');
+            let detailsHTML = `
+                <h3>💳 Payment Details</h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div>
+                        <strong>Amount Paid:</strong><br>
+                        $${params.amount} ${params.currency}
+                    </div>
+                    <div>
+                        <strong>Total Contributed:</strong><br>
+                        $${params.total} ${params.currency}
+                    </div>
+                </div>
+            `;
+            
+            if (params.componentId && params.componentId !== '') {
+                detailsHTML += `
+                    <div style="margin-top: 15px;">
+                        <strong>Component Unlocked:</strong><br>
+                        Component ID: ${params.componentId}
+                    </div>
+                `;
+                
+                // Show view component button
+                const viewBtn = document.getElementById('viewComponentBtn');
+                viewBtn.style.display = 'inline-block';
+                viewBtn.href = `/component.html?id=${params.componentId}`;
+            }
+            
+            paymentDetailsDiv.innerHTML = detailsHTML;
+            
+            // Show premium celebration if user is now premium
+            if (params.isPremium) {
+                document.getElementById('premiumCelebration').style.display = 'block';
+                
+                // Add confetti effect
+                createConfetti();
+            }
+        }
+
+        function createConfetti() {
+            // Simple confetti effect
+            const colors = ['#f1c40f', '#e74c3c', '#3498db', '#2ecc71', '#9b59b6'];
+            
+            for (let i = 0; i < 50; i++) {
+                setTimeout(() => {
+                    const confetti = document.createElement('div');
+                    confetti.style.position = 'fixed';
+                    confetti.style.width = '10px';
+                    confetti.style.height = '10px';
+                    confetti.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+                    confetti.style.left = Math.random() * window.innerWidth + 'px';
+                    confetti.style.top = '-10px';
+                    confetti.style.zIndex = '1000';
+                    confetti.style.borderRadius = '50%';
+                    confetti.style.pointerEvents = 'none';
+                    
+                    document.body.appendChild(confetti);
+                    
+                    // Animate falling
+                    let position = -10;
+                    const fallInterval = setInterval(() => {
+                        position += Math.random() * 5 + 2;
+                        confetti.style.top = position + 'px';
+                        confetti.style.left = (parseInt(confetti.style.left) + (Math.random() - 0.5) * 2) + 'px';
+                        
+                        if (position > window.innerHeight) {
+                            clearInterval(fallInterval);
+                            document.body.removeChild(confetti);
+                        }
+                    }, 50);
+                }, i * 100);
+            }
+        }
+
+        // Initialize the page
+        displaySuccessInfo();
+    </script>
 </body>
 </html>
