@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import cors from 'cors';
 import { HOST, PORT } from './src/config.js';
 
 // Importa las rutas
@@ -15,6 +16,7 @@ const app = express();
 
 app.use(express.json());
 app.use(express.static(path.resolve('src/public')));
+app.use(cors());
 
 // Ruta para la documentación de la API
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));

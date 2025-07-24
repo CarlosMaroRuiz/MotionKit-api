@@ -1,5 +1,4 @@
 import { PrismaClient } from '@prisma/client';
-import jwt from 'jsonwebtoken';
 
 const prisma = new PrismaClient();
 
@@ -30,62 +29,20 @@ const getFreeAccessibleComponents = async () => {
 export const getComponents = async (req, res) => {
     try {
         const { type } = req.query;
-        const token = req.headers.token;
         
         const whereClause = type ? { type } : {};
         
-        // Obtener todos los componentes con datos completos
         const components = await prisma.component.findMany({
             where: whereClause,
             select: { 
                 id: true, 
                 name: true, 
                 type: true,
-                jsxCode: true,
                 animationCode: true
             }
         });
         
-        // Si no hay token, devolver componentes con código oculto
-        if (!token) {
-            const publicComponents = components.map(component => ({
-                ...component,
-                jsxCode: null,
-                animationCode: null
-            }));
-            return res.json(publicComponents);
-        }
-        
-        // Verificar el usuario y su estado premium
-        try {
-            const decoded = jwt.verify(token, 'secret123');
-            const userId = decoded.id;
-            
-            // Verificar si tiene acceso premium
-            const hasPremiumAccess = await hasUserPremiumAccess(userId);
-            
-            if (hasPremiumAccess) {
-                // Usuario premium: devolver componentes completos
-                return res.json(components);
-            } else {
-                // Usuario no premium: ocultar código
-                const limitedComponents = components.map(component => ({
-                    ...component,
-                    jsxCode: null,
-                    animationCode: null
-                }));
-                return res.json(limitedComponents);
-            }
-        } catch (tokenError) {
-            // Token inválido: devolver componentes con código oculto
-            const publicComponents = components.map(component => ({
-                ...component,
-                jsxCode: null,
-                animationCode: null
-            }));
-            return res.json(publicComponents);
-        }
-        
+        res.json(components);
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
@@ -94,63 +51,195 @@ export const getComponents = async (req, res) => {
 export const getComponentsByType = async (req, res) => {
     try {
         const { type } = req.params;
-        const token = req.headers.token;
         
         if (!type) {
             return res.status(400).json({ message: 'Type parameter is required' });
         }
         
-        // Obtener todos los componentes del tipo especificado con datos completos
         const components = await prisma.component.findMany({
             where: { type },
             select: { 
                 id: true, 
                 name: true, 
                 type: true,
-                jsxCode: true,
                 animationCode: true
             }
         });
         
-        // Si no hay token, devolver componentes con código oculto
-        if (!token) {
-            const publicComponents = components.map(component => ({
-                ...component,
-                jsxCode: null,
-                animationCode: null
-            }));
-            return res.json(publicComponents);
+        res.json(components);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+// Nueva función para buscar componentes por tipo e ID
+export const searchComponents = async (req, res) => {
+    try {
+        const { type, id, name, single } = req.query;
+        
+        // Construir el objeto de filtros dinámicamente
+        const whereClause = {};
+        
+        if (type) {
+            whereClause.type = type;
         }
         
-        // Verificar el usuario y su estado premium
-        try {
-            const decoded = jwt.verify(token, 'secret123');
-            const userId = decoded.id;
-            
-            // Verificar si tiene acceso premium
-            const hasPremiumAccess = await hasUserPremiumAccess(userId);
-            
-            if (hasPremiumAccess) {
-                // Usuario premium: devolver componentes completos
-                return res.json(components);
-            } else {
-                // Usuario no premium: ocultar código
-                const limitedComponents = components.map(component => ({
-                    ...component,
-                    jsxCode: null,
-                    animationCode: null
-                }));
-                return res.json(limitedComponents);
-            }
-        } catch (tokenError) {
-            // Token inválido: devolver componentes con código oculto
-            const publicComponents = components.map(component => ({
-                ...component,
-                jsxCode: null,
-                animationCode: null
-            }));
-            return res.json(publicComponents);
+        if (id) {
+            // Si se proporciona ID, hacer búsqueda exacta ya que los IDs son únicos
+            whereClause.id = id;
         }
+        
+        if (name) {
+            // Búsqueda por nombre que contenga el texto (SQLite compatible)
+            whereClause.name = {
+                contains: name
+            };
+        }
+        
+        // Si se busca por ID (que es único), usar findUnique para mayor eficiencia
+        if (id && !name && !type) {
+            const component = await prisma.component.findUnique({
+                where: { id },
+                select: { 
+                    id: true, 
+                    name: true, 
+                    type: true,
+                    animationCode: true
+                }
+            });
+            
+            if (!component) {
+                return res.status(404).json({ 
+                    message: `Component with ID '${id}' not found`
+                });
+            }
+            
+            return res.json(component);
+        }
+        
+        // Para búsquedas combinadas o por otros campos
+        const components = await prisma.component.findMany({
+            where: whereClause,
+            select: { 
+                animationCode: true,
+                jsxCode: true
+            },
+            orderBy: { name: 'asc' }
+        });
+        
+        // Si se busca por ID específico (búsqueda exacta), devolver objeto único
+        if (id) {
+            if (components.length === 0) {
+                return res.status(404).json({ 
+                    message: `Component with ID '${id}' and type '${type || 'any'}' not found`
+                });
+            }
+            
+            // Como el ID es único, siempre debería haber máximo 1 resultado
+            return res.json(components[0]);
+        }
+        
+        // Si el parámetro 'single' está presente o solo hay un resultado, devolver el objeto directamente
+        if (single === 'true' || components.length === 1) {
+            if (components.length === 0) {
+                return res.status(404).json({ 
+                    message: 'No component found matching the criteria',
+                    filters: {
+                        type: type || null,
+                        id: id || null,
+                        name: name || null
+                    }
+                });
+            }
+            
+            return res.json(components[0]);
+        }
+        
+        // Respuesta estándar con array para búsquedas generales
+        res.json({
+            results: components,
+            count: components.length,
+            filters: {
+                type: type || null,
+                id: id || null,
+                name: name || null
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+// Nueva función para buscar un componente específico por tipo e ID
+export const getComponentByTypeAndId = async (req, res) => {
+    try {
+        const { type, id } = req.params;
+        const userId = req.user.id;
+        
+        // Verificar si el componente existe con el tipo e ID especificados
+        const component = await prisma.component.findFirst({
+            where: { 
+                type: type,
+                id: id
+            },
+            select: { 
+                id: true, 
+                name: true, 
+                type: true, 
+                jsxCode: true, 
+                animationCode: true 
+            }
+        });
+        
+        if (!component) {
+            return res.status(404).json({ 
+                message: `Component with type '${type}' and ID '${id}' not found` 
+            });
+        }
+        
+        // Verificar si el usuario tiene acceso premium
+        const hasPremiumAccess = await hasUserPremiumAccess(userId);
+        
+        if (hasPremiumAccess) {
+            // Usuario premium: acceso completo
+            return res.json(component);
+        }
+        
+        // Usuario gratuito: verificar límites
+        const freeAccessibleComponents = await getFreeAccessibleComponents();
+        
+        if (freeAccessibleComponents.includes(id)) {
+            // Componente dentro del límite gratuito
+            return res.json(component);
+        }
+        
+        // Verificar si el usuario ha donado específicamente para este componente
+        const donation = await prisma.donation.findFirst({
+            where: {
+                componentId: id,
+                userId: userId,
+            },
+        });
+        
+        if (!donation) {
+            // Sin acceso: mostrar información limitada
+            return res.status(403).json({ 
+                message: 'Access denied. You need premium access or donate for this component.',
+                component: {
+                    id: component.id,
+                    name: component.name,
+                    type: component.type
+                },
+                premiumInfo: {
+                    totalNeeded: PREMIUM_THRESHOLD,
+                    currency: 'MXN',
+                    benefits: 'Unlock entire catalog'
+                }
+            });
+        }
+        
+        // Usuario ha donado por este componente específico
+        res.json(component);
         
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -284,8 +373,28 @@ export const getUserAccessInfo = async (req, res) => {
         const totalAmount = totalDonations._sum.amount || 0;
         const hasPremiumAccess = totalAmount >= PREMIUM_THRESHOLD;
         
-        // Obtener total de componentes disponibles
-        const totalComponents = await prisma.component.count();
+        // Obtener componentes accesibles
+        let accessibleComponents = [];
+        
+        if (hasPremiumAccess) {
+            // Usuario premium: todos los componentes
+            const allComponents = await prisma.component.findMany({
+                select: { id: true, name: true, type: true }
+            });
+            accessibleComponents = allComponents.map(c => c.id);
+        } else {
+            // Usuario gratuito: componentes limitados + donaciones específicas
+            const freeComponents = await getFreeAccessibleComponents();
+            const paidComponents = await prisma.donation.findMany({
+                where: { userId, componentId: { not: null } },
+                select: { componentId: true }
+            });
+            
+            accessibleComponents = [
+                ...freeComponents,
+                ...paidComponents.map(d => d.componentId)
+            ];
+        }
         
         res.json({
             user: {
@@ -296,9 +405,8 @@ export const getUserAccessInfo = async (req, res) => {
                 freeAccessLimit: FREE_ACCESS_LIMIT
             },
             access: {
-                hasFullAccess: hasPremiumAccess,
-                totalComponentsAvailable: totalComponents,
-                accessLevel: hasPremiumAccess ? 'premium' : 'limited'
+                totalAccessibleComponents: accessibleComponents.length,
+                accessibleComponentIds: accessibleComponents
             }
         });
         
