@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authRequired } from '../middleware/auth.middleware.js';
+import { authRequired, authOptional } from '../middleware/auth.middleware.js';
 import { 
     getComponents, 
     createComponent, 
@@ -21,21 +21,21 @@ const router = Router();
  *       properties:
  *         id:
  *           type: string
- *           nullable: true
- *           description: Component ID (can be null for auto-generated)
+ *           description: Component ID
  *         name:
  *           type: string
  *           description: Name of the component
  *         jsxCode:
  *           type: string
- *           description: JSX code for the component
+ *           nullable: true
+ *           description: JSX code for the component (null if no access)
  *         type:
  *           type: string
  *           description: Type/category of the component
  *         animationCode:
  *           type: string
  *           nullable: true
- *           description: Animation code for the component (optional)
+ *           description: Animation code for the component (null if no access or not provided)
  *     ComponentSummary:
  *       type: object
  *       properties:
@@ -45,34 +45,13 @@ const router = Router();
  *           type: string
  *         type:
  *           type: string
- *     SearchResults:
- *       type: object
- *       properties:
- *         results:
- *           type: array
- *           items:
- *             $ref: '#/components/schemas/ComponentSummary'
- *         count:
- *           type: number
- *         filters:
- *           type: object
- *           properties:
- *             type:
- *               type: string
- *               nullable: true
- *             id:
- *               type: string
- *               nullable: true
- *             name:
- *               type: string
- *               nullable: true
  */
 
 /**
  * @swagger
  * /api/components:
  *   get:
- *     summary: Get a list of all components
+ *     summary: Get a list of all components (public info only)
  *     tags: [Components]
  *     parameters:
  *       - in: query
@@ -82,13 +61,17 @@ const router = Router();
  *         description: Filter components by type
  *     responses:
  *       200:
- *         description: A list of components (without JSX code)
+ *         description: A list of components (basic info only, no sensitive code)
  *         content:
  *           application/json:
  *             schema:
  *               type: array
  *               items:
  *                 $ref: '#/components/schemas/ComponentSummary'
+ *     description: |
+ *       Returns basic component information (id, name, type) for all components.
+ *       Does NOT include jsxCode or animationCode for security reasons.
+ *       Use authenticated endpoints to get complete component data.
  */
 router.get('/', getComponents);
 
@@ -96,8 +79,10 @@ router.get('/', getComponents);
  * @swagger
  * /api/components/search:
  *   get:
- *     summary: Search components by multiple criteria
+ *     summary: Search components by multiple criteria (requires authentication)
  *     tags: [Components]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: query
  *         name: type
@@ -108,52 +93,51 @@ router.get('/', getComponents);
  *         name: id
  *         schema:
  *           type: string
- *         description: Search by exact component ID (unique identifier - returns single object)
+ *         description: Search by exact component ID
  *       - in: query
  *         name: name
  *         schema:
  *           type: string
- *         description: Search by component name (supports partial matching)
+ *         description: Search by component name (partial matching)
  *       - in: query
  *         name: single
  *         schema:
  *           type: string
  *           enum: ['true', 'false']
- *         description: If 'true', returns single object instead of array when only one result found
+ *         description: Return single object instead of array when only one result
  *     responses:
  *       200:
- *         description: Search results - returns single object when searching by ID, array otherwise
+ *         description: Search results with access-controlled data
  *         content:
  *           application/json:
- *             oneOf:
- *               - $ref: '#/components/schemas/SearchResults'
- *               - $ref: '#/components/schemas/ComponentSummary'
+ *             schema:
+ *               oneOf:
+ *                 - type: object
+ *                   properties:
+ *                     results:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/Component'
+ *                     count:
+ *                       type: number
+ *                     filters:
+ *                       type: object
+ *                 - $ref: '#/components/schemas/Component'
+ *       401:
+ *         description: Unauthorized
  *       404:
- *         description: Component not found (when searching by specific ID or no results match criteria)
- *       500:
- *         description: Server error
- *     examples:
- *       search_by_exact_id:
- *         summary: Get component by exact ID (returns single object)
- *         value:
- *           id: "button-magnetic-5"
- *       search_by_type_and_id:
- *         summary: Get component by type and exact ID (returns single object)
- *         value:
- *           type: "button"
- *           id: "button-magnetic-5"
- *       search_by_name:
- *         summary: Search components with "modal" in name (returns array)
- *         value:
- *           name: "modal"
+ *         description: No components found
+ *     description: |
+ *       Returns components based on search criteria. If user doesn't have access to a component,
+ *       jsxCode and animationCode will be null in the response.
  */
-router.get('/search', authRequired ,searchComponents);
+router.get('/search', authRequired, searchComponents);
 
 /**
  * @swagger
  * /api/components/type/{type}:
  *   get:
- *     summary: Get components filtered by type
+ *     summary: Get components filtered by type (authentication optional)
  *     tags: [Components]
  *     parameters:
  *       - in: path
@@ -162,6 +146,12 @@ router.get('/search', authRequired ,searchComponents);
  *         schema:
  *           type: string
  *         description: The component type to filter by
+ *       - in: header
+ *         name: token
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Optional authentication token for full access
  *     responses:
  *       200:
  *         description: Components of the specified type
@@ -170,11 +160,14 @@ router.get('/search', authRequired ,searchComponents);
  *             schema:
  *               type: array
  *               items:
- *                 $ref: '#/components/schemas/ComponentSummary'
+ *                 $ref: '#/components/schemas/Component'
  *       400:
  *         description: Type parameter is required
+ *     description: |
+ *       If authenticated, returns components with access-controlled data.
+ *       If not authenticated, returns only basic info (jsxCode and animationCode will be null).
  */
-router.get('/type/:type', getComponentsByType);
+router.get('/type/:type', authOptional, getComponentsByType);
 
 /**
  * @swagger
@@ -205,7 +198,7 @@ router.get('/type/:type', getComponentsByType);
  *             schema:
  *               $ref: '#/components/schemas/Component'
  *       403:
- *         description: Access denied (user needs premium access or specific donation)
+ *         description: Access denied (jsxCode and animationCode are null)
  *         content:
  *           application/json:
  *             schema:
@@ -214,18 +207,22 @@ router.get('/type/:type', getComponentsByType);
  *                 message:
  *                   type: string
  *                 component:
- *                   $ref: '#/components/schemas/ComponentSummary'
- *                 premiumInfo:
  *                   type: object
  *                   properties:
- *                     totalNeeded:
- *                       type: number
- *                     currency:
+ *                     id:
  *                       type: string
- *                     benefits:
+ *                     name:
  *                       type: string
+ *                     type:
+ *                       type: string
+ *                     jsxCode:
+ *                       type: null
+ *                     animationCode:
+ *                       type: null
+ *                 premiumInfo:
+ *                   type: object
  *       404:
- *         description: Component not found with specified type and ID
+ *         description: Component not found
  *       401:
  *         description: Unauthorized
  */
@@ -235,7 +232,7 @@ router.get('/type/:type/id/:id', authRequired, getComponentByTypeAndId);
  * @swagger
  * /api/components/user/access-info:
  *   get:
- *     summary: Get user access information
+ *     summary: Get user access information and statistics
  *     tags: [Components]
  *     security:
  *       - bearerAuth: []
@@ -252,23 +249,30 @@ router.get('/type/:type/id/:id', authRequired, getComponentByTypeAndId);
  *                   properties:
  *                     totalDonated:
  *                       type: number
+ *                       description: Total amount donated by user
  *                     currency:
  *                       type: string
+ *                       example: "MXN"
  *                     isPremium:
  *                       type: boolean
+ *                       description: Whether user has premium access
  *                     premiumThreshold:
  *                       type: number
+ *                       description: Amount needed for premium access
  *                     freeAccessLimit:
  *                       type: number
+ *                       description: Number of free components available
  *                 access:
  *                   type: object
  *                   properties:
  *                     totalAccessibleComponents:
  *                       type: number
+ *                       description: Total number of components user can access
  *                     accessibleComponentIds:
  *                       type: array
  *                       items:
  *                         type: string
+ *                       description: List of component IDs user can access
  *       401:
  *         description: Unauthorized
  */
@@ -305,24 +309,24 @@ router.get('/user/access-info', authRequired, getUserAccessInfo);
  *                 description: JSX code for the component
  *               type:
  *                 type: string
- *                 description: Type/category of the component (e.g., button, card, modal)
+ *                 description: Type/category of the component
  *               animationCode:
  *                 type: string
  *                 nullable: true
  *                 description: Optional animation code for the component
  *     responses:
  *       201:
- *         description: The component was successfully created
+ *         description: Component created successfully
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/Component'
  *       400:
- *         description: Invalid input data
+ *         description: Invalid input data or reserved ID
  *       409:
  *         description: Component with this ID already exists
  *       401:
- *         description: Unauthorized (token is missing or invalid)
+ *         description: Unauthorized
  */
 router.post('/', authRequired, createComponent);
 
@@ -349,7 +353,7 @@ router.post('/', authRequired, createComponent);
  *             schema:
  *               $ref: '#/components/schemas/Component'
  *       403:
- *         description: Access denied (user needs premium access or specific donation)
+ *         description: Access denied - user needs to pay or upgrade
  *         content:
  *           application/json:
  *             schema:
@@ -357,21 +361,41 @@ router.post('/', authRequired, createComponent);
  *               properties:
  *                 message:
  *                   type: string
+ *                   example: "Access denied. You need premium access or donate for this component."
  *                 component:
- *                   $ref: '#/components/schemas/ComponentSummary'
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                     name:
+ *                       type: string
+ *                     type:
+ *                       type: string
+ *                     jsxCode:
+ *                       type: null
+ *                       description: "Null because user doesn't have access"
+ *                     animationCode:
+ *                       type: null
+ *                       description: "Null because user doesn't have access"
  *                 premiumInfo:
  *                   type: object
  *                   properties:
  *                     totalNeeded:
  *                       type: number
+ *                       example: 50
  *                     currency:
  *                       type: string
+ *                       example: "MXN"
  *                     benefits:
  *                       type: string
+ *                       example: "Unlock entire catalog"
  *       404:
  *         description: Component not found
  *       401:
  *         description: Unauthorized
+ *     description: |
+ *       Returns complete component data if user has access (premium or specific donation).
+ *       If no access, returns component info with jsxCode and animationCode set to null.
  */
 router.get('/:id', authRequired, getComponent);
 

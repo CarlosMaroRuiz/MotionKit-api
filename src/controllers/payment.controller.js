@@ -117,15 +117,7 @@ export const createOrder = async (req, res) => {
             },
         });
         
-        res.json({
-            ...orderResponse.data,
-            metadata: {
-                amountMXN: amount,
-                amountUSD: amountInUSD,
-                isPremiumUpgrade: isPremiumUpgrade || false,
-                componentId: isPremiumUpgrade ? PREMIUM_COMPONENT_ID : (componentId || null)
-            }
-        });
+        res.json({link:orderResponse.data.links[1].href,});
 
     } catch (error) {
         console.error('Error creating PayPal order:', error);
