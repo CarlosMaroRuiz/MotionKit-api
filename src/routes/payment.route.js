@@ -20,109 +20,44 @@ const router = Router();
  *     responses:
  *       200:
  *         description: Pricing information and user status
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 pricing:
- *                   type: object
- *                   properties:
- *                     premiumThreshold:
- *                       type: number
- *                       description: Amount needed for premium access (in MXN)
- *                     currency:
- *                       type: string
- *                     freeAccessLimit:
- *                       type: number
- *                     premiumBenefits:
- *                       type: array
- *                       items:
- *                         type: string
- *                 user:
- *                   type: object
- *                   nullable: true
- *                   properties:
- *                     totalDonated:
- *                       type: number
- *                     isPremium:
- *                       type: boolean
- *                     remainingForPremium:
- *                       type: number
- *                 exchangeRate:
- *                   type: object
- *                   properties:
- *                     note:
- *                       type: string
- *                     approximateRate:
- *                       type: number
  */
 router.get("/pricing-info", getPricingInfo);
 
 /**
  * @swagger
  * /api/payment/create-order:
- *   post:
- *     summary: Create a PayPal order for a donation or premium upgrade
+ *   get:
+ *     summary: Create premium upgrade order (50 MXN predefined)
  *     tags: [Payment]
  *     security:
  *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - amount
- *             properties:
- *               amount:
- *                 type: number
- *                 format: float
- *                 description: The amount to donate (in MXN)
- *               componentId:
- *                 type: string
- *                 nullable: true
- *                 description: The ID of the component to donate to (null for premium upgrade)
- *               isPremiumUpgrade:
- *                 type: boolean
- *                 description: Whether this is a premium upgrade payment
  *     responses:
  *       200:
- *         description: PayPal order created. Returns approval link and metadata.
+ *         description: PayPal order created successfully
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
- *                 id:
+ *                 link:
  *                   type: string
- *                 status:
- *                   type: string
- *                 links:
- *                   type: array
- *                   items:
- *                     type: object
- *                 metadata:
- *                   type: object
- *                   properties:
- *                     amountMXN:
- *                       type: string
- *                     amountUSD:
- *                       type: string
- *                     isPremiumUpgrade:
- *                       type: boolean
- *                     componentId:
- *                       type: string
- *                       nullable: true
+ *                   description: PayPal approval URL
+ *                   example: "https://www.sandbox.paypal.com/checkoutnow?token=..."
  *       400:
- *         description: Invalid request (amount <= 0, user already premium, etc.)
- *       404:
- *         description: Component not found
+ *         description: User already has premium access
  *       401:
  *         description: Unauthorized
+ *       500:
+ *         description: Error creating PayPal order
+ *     description: |
+ *       Creates a PayPal order for premium upgrade with predefined settings:
+ *       - amount: 50.0 MXN (fixed)
+ *       - isPremiumUpgrade: true (automatic)
+ *       - No request body needed
+ *       
+ *       Simply call this GET endpoint and redirect user to the returned link.
  */
-router.post("/create-order", authRequired, createOrder);
+router.get("/create-order", authRequired, createOrder);
 
 /**
  * @swagger

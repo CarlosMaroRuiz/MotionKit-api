@@ -5,7 +5,7 @@ import axios from 'axios';
 const prisma = new PrismaClient();
 
 const PREMIUM_THRESHOLD = 50; // 50 pesos mexicanos
-const USD_TO_MXN_RATE = 17; // Tasa de cambio aproximada (deberías obtenerla de una API)
+const USD_TO_MXN_RATE = 17; // Tasa de cambio aproximada
 const PREMIUM_COMPONENT_ID = 'premium-access'; // ID especial para donaciones premium
 
 // Función para asegurar que el componente premium existe
@@ -27,60 +27,34 @@ async function ensurePremiumComponentExists() {
     }
 }
 
+// Ruta simplificada para crear orden premium (GET)
 export const createOrder = async (req, res) => {
     try {
-        const { amount, componentId, isPremiumUpgrade } = req.body;
         const userId = req.user.id;
 
-        // Validaciones
-        if (parseFloat(amount) <= 0) {
-            return res.status(400).json({ message: 'Donation amount must be greater than 0.' });
+        // Verificar que el usuario no sea ya premium
+        const totalDonations = await prisma.donation.aggregate({
+            where: { userId },
+            _sum: { amount: true }
+        });
+        
+        const currentTotal = totalDonations._sum.amount || 0;
+        
+        if (currentTotal >= PREMIUM_THRESHOLD) {
+            return res.status(400).json({ 
+                message: 'User already has premium access.'
+            });
         }
 
-        // Si es upgrade premium, verificar que no sea ya premium
-        if (isPremiumUpgrade) {
-            const totalDonations = await prisma.donation.aggregate({
-                where: { userId },
-                _sum: { amount: true }
-            });
-            
-            const currentTotal = totalDonations._sum.amount || 0;
-            if (currentTotal >= PREMIUM_THRESHOLD) {
-                return res.status(400).json({ 
-                    message: 'User already has premium access.' 
-                });
-            }
-            
-            // Asegurar que el componente premium existe
-            await ensurePremiumComponentExists();
-        }
+        // Asegurar que el componente premium existe
+        await ensurePremiumComponentExists();
 
-        // Si no es upgrade premium, verificar que el componente existe
-        if (!isPremiumUpgrade && componentId) {
-            const component = await prisma.component.findUnique({
-                where: { id: componentId }
-            });
-            
-            if (!component) {
-                return res.status(404).json({ message: 'Component not found.' });
-            }
+        // Datos predefinidos para upgrade premium
+        const amount = 50.0; // Cantidad fija
+        const isPremiumUpgrade = true;
+        const componentId = PREMIUM_COMPONENT_ID;
 
-            // Verificar si ya donó por este componente
-            const existingDonation = await prisma.donation.findFirst({
-                where: {
-                    userId,
-                    componentId
-                }
-            });
-            
-            if (existingDonation) {
-                return res.status(400).json({ 
-                    message: 'You have already donated for this component.' 
-                });
-            }
-        }
-
-        // Convertir MXN a USD para PayPal (PayPal trabaja en USD)
+        // Convertir MXN a USD para PayPal
         const amountInUSD = (parseFloat(amount) / USD_TO_MXN_RATE).toFixed(2);
 
         const order = {
@@ -90,19 +64,18 @@ export const createOrder = async (req, res) => {
                     currency_code: 'USD',
                     value: amountInUSD,
                 },
-                description: isPremiumUpgrade 
-                    ? 'Premium Access Upgrade - Component Store'
-                    : `Access to component: ${componentId || 'Custom'}`
+                description: 'Premium Access Upgrade - Component Store'
             }],
             application_context: {
                 brand_name: 'Component Store',
                 landing_page: 'NO_PREFERENCE',
                 user_action: 'PAY_NOW',
-                return_url: `${HOST}/api/payment/capture-order?componentId=${isPremiumUpgrade ? PREMIUM_COMPONENT_ID : componentId || ''}&userId=${userId}&amount=${amount}&isPremiumUpgrade=${isPremiumUpgrade || false}`,
+                return_url: `${HOST}/api/payment/capture-order?componentId=${componentId}&userId=${userId}&amount=${amount}&isPremiumUpgrade=true`,
                 cancel_url: `${HOST}/api/payment/cancel-order`,
             },
         };
 
+        // Obtener token de PayPal
         const params = new URLSearchParams();
         params.append('grant_type', 'client_credentials');
 
@@ -110,6 +83,7 @@ export const createOrder = async (req, res) => {
             auth: { username: PAYPAL_API_CLIENT, password: PAYPAL_API_SECRET },
         });
 
+        // Crear orden en PayPal
         const orderResponse = await axios.post(`${PAYPAL_API_URL}/v2/checkout/orders`, order, {
             headers: {
                 'Content-Type': 'application/json',
@@ -117,6 +91,7 @@ export const createOrder = async (req, res) => {
             },
         });
         
+        // Respuesta simple como solicitas
         res.json({link:orderResponse.data.links[1].href,});
 
     } catch (error) {
@@ -164,7 +139,7 @@ export const captureOrder = async (req, res) => {
         const donationData = {
             amount: parseFloat(amount),
             userId,
-            componentId: finalComponentId || PREMIUM_COMPONENT_ID // Usar premium como fallback
+            componentId: finalComponentId || PREMIUM_COMPONENT_ID
         };
 
         await prisma.donation.create({
@@ -181,7 +156,7 @@ export const captureOrder = async (req, res) => {
         const nowHasPremium = newTotal >= PREMIUM_THRESHOLD;
 
         // Redirigir a página de éxito con información
-        const successUrl = `/payment-success.html?` + 
+        const successUrl = `/payment.html?` + 
             `amount=${amount}&` +
             `currency=MXN&` +
             `isPremium=${nowHasPremium}&` +
@@ -200,7 +175,7 @@ export const cancelOrder = (req, res) => {
     res.redirect('/payment-cancelled.html');
 };
 
-// Nuevo endpoint para obtener información de precios
+// Endpoint para obtener información de precios
 export const getPricingInfo = async (req, res) => {
     try {
         const userId = req.user?.id;
