@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payment Cancelled - Component Store</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #ffa726 0%, #ff9800 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .cancelled-container {
+            background: white;
+            padding: 40px;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.1);
+            text-align: center;
+            max-width: 600px;
+            width: 100%;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .cancelled-container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 5px;
+            background: linear-gradient(90deg, #ffa726, #ff9800, #ffa726);
+        }
+
+        .cancelled-icon {
+            font-size: 80px;
+            margin-bottom: 20px;
+            animation: sway 2s ease-in-out infinite;
+        }
+
+        @keyframes sway {
+            0%, 100% { transform: rotate(-10deg); }
+            50% { transform: rotate(10deg); }
+        }
+
+        .cancelled-title {
+            color: #f57c00;
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 15px;
+        }
+
+        .cancelled-subtitle {
+            color: #666;
+            font-size: 18px;
+            margin-bottom: 30px;
+            line-height: 1.5;
+        }
+
+        .cancellation-info {
+            background: #fff8e1;
+            border: 2px solid #ffcc02;
+            border-radius: 15px;
+            padding: 25px;
+            margin: 30px 0;
+            text-align: left;
+        }
+
+        .cancellation-info h3 {
+            color: #f57c00;
+            font-size: 20px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .info-item {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            border-left: 4px solid #ffa726;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .info-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .next-steps {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 25px;
+            margin: 25px 0;
+            text-align: left;
+        }
+
+        .next-steps h4 {
+            color: #495057;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .next-steps ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .next-steps li {
+            padding: 10px 0;
+            border-bottom: 1px solid #dee2e6;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+
+        .next-steps li:last-child {
+            border-bottom: none;
+        }
+
+        .next-steps li::before {
+            content: '👉';
+            flex-shrink: 0;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 30px;
+        }
+
+        .btn {
+            padding: 15px 30px;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.3s ease;
+            min-width: 160px;
+            justify-content: center;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        }
+
+        .btn-warning {
+            background: linear-gradient(135deg, #ffa726, #ff9800);
+            color: white;
+            box-shadow: 0 4px 15px rgba(255, 167, 38, 0.4);
+        }
+
+        .btn-warning:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(255, 167, 38, 0.6);
+        }
+
+        .btn-outline {
+            background: white;
+            color: #f57c00;
+            border: 2px solid #f57c00;
+        }
+
+        .btn-outline:hover {
+            background: #f57c00;
+            color: white;
+            transform: translateY(-2px);
+        }
+
+        .footer-info {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            color: #666;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .footer-info .icon {
+            margin-right: 8px;
+        }
+
+        .help-section {
+            background: #e3f2fd;
+            border: 2px solid #90caf9;
+            border-radius: 15px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: left;
+        }
+
+        .help-section h4 {
+            color: #1976d2;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .help-section p {
+            color: #555;
+            line-height: 1.5;
+        }
+
+        @media (max-width: 768px) {
+            .cancelled-container {
+                padding: 30px 20px;
+                margin: 10px;
+            }
+            
+            .cancelled-title {
+                font-size: 24px;
+            }
+            
+            .cancelled-subtitle {
+                font-size: 16px;
+            }
+            
+            .action-buttons {
+                flex-direction: column;
+                align-items: center;
+            }
+            
+            .btn {
+                width: 100%;
+                max-width: 300px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="cancelled-container">
+        <div class="cancelled-icon">⚠️</div>
+        <h1 class="cancelled-title">Payment Cancelled</h1>
+        <p class="cancelled-subtitle">No worries! You cancelled the payment process.</p>
+        
+        <div class="cancellation-info">
+            <h3>ℹ️ What happened?</h3>
+            <div class="info-item">
+                <span>🚫</span>
+                <div>
+                    <strong>Payment was cancelled</strong><br>
+                    You chose to cancel the payment process on PayPal
+                </div>
+            </div>
+            <div class="info-item">
+                <span>💳</span>
+                <div>
+                    <strong>No charges were made</strong><br>
+                    Your payment method was not charged
+                </div>
+            </div>
+            <div class="info-item">
+                <span>🔒</span>
+                <div>
+                    <strong>Your data is safe</strong><br>
+                    No financial information was stored or processed
+                </div>
+            </div>
+        </div>
+
+        <div class="next-steps">
+            <h4>🎯 What you can do next:</h4>
+            <ul>
+                <li>Browse our component catalog and find something you like</li>
+                <li>Try the payment process again when you're ready</li>
+                <li>Check out our free components available without payment</li>
+                <li>Contact support if you have questions about pricing</li>
+                <li>Review your PayPal account settings if needed</li>
+            </ul>
+        </div>
+
+        <div class="help-section">
+            <h4>❓ Need help with payments?</h4>
+            <p>
+                If you're having trouble with the payment process or have questions about our pricing, 
+                our support team is here to help. We accept payments through PayPal for your security and convenience.
+            </p>
+        </div>
+
+        <div class="action-buttons">
+            <a href="/" class="btn btn-primary">
+                🏠 Back to Store
+            </a>
+            <a href="javascript:history.back()" class="btn btn-warning">
+                🔄 Try Payment Again
+            </a>
+            <a href="/api/payment/pricing-info" class="btn btn-outline">
+                💰 View Pricing
+            </a>
+        </div>
+
+        <div class="footer-info">
+            <p><span class="icon">🕒</span>Cancellation time: <span id="cancellation-time"></span></p>
+            <p><span class="icon">🔐</span>All transactions are secured by PayPal's encryption.</p>
+            <p><span class="icon">💬</span>Have questions? Contact us at support@componentstore.com</p>
+        </div>
+    </div>
+
+    <script>
+        class PaymentCancelledHandler {
+            constructor() {
+                this.init();
+            }
+
+            init() {
+                this.setCancellationTime();
+                this.setupEventListeners();
+                this.trackCancellation();
+            }
+
+            setCancellationTime() {
+                const now = new Date();
+                const timeString = now.toLocaleString('en-US', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    timeZoneName: 'short'
+                });
+                document.getElementById('cancellation-time').textContent = timeString;
+            }
+
+            setupEventListeners() {
+                // Personalizar el botón "Try Payment Again"
+                const tryAgainBtn = document.querySelector('a[href="javascript:history.back()"]');
+                if (tryAgainBtn) {
+                    tryAgainBtn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        this.retryPayment();
+                    });
+                }
+
+                // Personalizar navegación
+                const backBtn = document.querySelector('a[href="/"]');
+                if (backBtn) {
+                    backBtn.addEventListener('click', (e) => {
+                        // Limpiar cualquier estado de pago guardado
+                        this.clearPaymentState();
+                    });
+                }
+            }
+
+            retryPayment() {
+                // Intentar volver a la página donde se inició el pago
+                if (document.referrer && document.referrer.includes(window.location.origin)) {
+                    // Si vinimos de nuestro sitio, volver allí
+                    window.location.href = document.referrer;
+                } else {
+                    // Si no, ir a la página principal
+                    window.location.href = '/';
+                }
+            }
+
+            clearPaymentState() {
+                // Limpiar cualquier estado de pago en localStorage
+                try {
+                    localStorage.removeItem('paymentContext');
+                    localStorage.removeItem('pendingPayment');
+                    sessionStorage.removeItem('paymentData');
+                } catch (error) {
+                    console.error('Error clearing payment state:', error);
+                }
+            }
+
+            trackCancellation() {
+                // Opcional: Registrar la cancelación para analytics
+                const cancellationData = {
+                    timestamp: new Date().toISOString(),
+                    userAgent: navigator.userAgent,
+                    referrer: document.referrer,
+                    action: 'payment_cancelled'
+                };
+
+                // Enviar datos de cancelación (opcional)
+                this.reportCancellation(cancellationData);
+            }
+
+            async reportCancellation(data) {
+                try {
+                    // Solo reportar si hay un endpoint disponible
+                    await fetch('/api/payment/track-cancellation', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(data)
+                    });
+                } catch (error) {
+                    // Silenciar errores de tracking
+                    console.debug('Cancellation tracking failed:', error);
+                }
+            }
+
+            // Mostrar mensaje personalizado basado en el contexto
+            showContextualMessage() {
+                const urlParams = new URLSearchParams(window.location.search);
+                const context = urlParams.get('context');
+                const amount = urlParams.get('amount');
+
+                if (context === 'premium' && amount) {
+                    const infoSection = document.querySelector('.cancellation-info');
+                    const contextMessage = document.createElement('div');
+                    contextMessage.className = 'info-item';
+                    contextMessage.innerHTML = `
+                        <span>💎</span>
+                        <div>
+                            <strong>Premium upgrade cancelled</strong><br>
+                            You cancelled the ${amount} MXN premium upgrade
+                        </div>
+                    `;
+                    infoSection.appendChild(contextMessage);
+                }
+            }
+        }
+
+        // Inicializar cuando cargue la página
+        document.addEventListener('DOMContentLoaded', () => {
+            const handler = new PaymentCancelledHandler();
+            handler.showContextualMessage();
+        });
+
+        // Función para mostrar información sobre componentes gratuitos
+        function showFreeComponents() {
+            alert('You can access 2 components for free! Browse our catalog to see which ones are available without payment.');
+            window.location.href = '/';
+        }
+
+        // Función para mostrar información de precios
+        function showPricingInfo() {
+            window.location.href = '/api/payment/pricing-info';
+        }
+
+        // Prevenir que el usuario se quede atascado en esta página
+        window.addEventListener('beforeunload', () => {
+            // Limpiar cualquier estado relacionado con el pago
+            try {
+                localStorage.removeItem('paymentContext');
+            } catch (error) {
+                console.error('Error cleaning up:', error);
+            }
+        });
+
+        // Agregar efecto visual sutil
+        document.addEventListener('DOMContentLoaded', () => {
+            const container = document.querySelector('.cancelled-container');
+            
+            // Efecto de entrada suave
+            container.style.opacity = '0';
+            container.style.transform = 'translateY(20px)';
+            
+            setTimeout(() => {
+                container.style.transition = 'all 0.5s ease';
+                container.style.opacity = '1';
+                container.style.transform = 'translateY(0)';
+            }, 100);
+        });
+    </script>
+</body>
+</html>
