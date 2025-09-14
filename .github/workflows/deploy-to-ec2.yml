@@ -1,0 +1,116 @@
+name: Deploy to EC2 with Dockerfile
+
+on:
+  push:
+    branches: [ main ]  # Ajusta según tu rama principal
+  workflow_dispatch:    # Permite ejecutar el workflow manualmente
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Setup SSH
+      uses: webfactory/ssh-agent@v0.7.0
+      with:
+        ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+    
+    - name: Add host key to known hosts
+      run: |
+        mkdir -p ~/.ssh
+        ssh-keyscan ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+    
+    - name: Setup remote directory
+      run: |
+        ssh ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} '
+          if [ ! -d "~/component-store-api" ]; then
+            mkdir -p ~/component-store-api
+          fi
+        '
+    
+    - name: Copy files to EC2
+      run: |
+        rsync -avz --exclude='.git' --exclude='.github' --exclude='node_modules' ./ ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }}:~/component-store-api/
+    
+    - name: Create .env file
+      run: |
+        ssh ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} '
+          cat > ~/component-store-api/.env << EOL
+        PORT=3000
+        PAYPAL_API_CLIENT=${{ secrets.PAYPAL_API_CLIENT }}
+        PAYPAL_API_SECRET=${{ secrets.PAYPAL_API_SECRET }}
+        PAYPAL_API_URL=https://api.sandbox.paypal.com
+        HOST=http://${{ secrets.EC2_HOST }}:3000
+        JWT_SECRET=${{ secrets.JWT_SECRET }}
+        DATABASE_URL=${{ secrets.DATABASE_URL }}
+        EOL
+        '
+    
+    - name: Deploy with Docker
+      run: |
+        ssh ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} '
+          cd ~/component-store-api
+          
+          # Verificar si Docker está instalado, si no, instalarlo
+          if ! command -v docker &> /dev/null; then
+            echo "Docker no está instalado. Instalando..."
+            sudo yum update -y
+            sudo amazon-linux-extras install docker -y
+            sudo systemctl start docker
+            sudo systemctl enable docker
+            sudo usermod -a -G docker $USER
+            # Aplicar cambios de grupo
+            sudo su - $USER -c "newgrp docker"
+          fi
+          
+          # Verificar si Docker Compose está instalado, si no, instalarlo
+          if ! command -v docker-compose &> /dev/null; then
+            echo "Docker Compose no está instalado. Instalando..."
+            sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+            sudo chmod +x /usr/local/bin/docker-compose
+          fi
+          
+          # Verificar que el Dockerfile existe
+          if [ ! -f "Dockerfile" ]; then
+            echo "Error: Dockerfile no encontrado en el directorio"
+            exit 1
+          fi
+          
+          echo "Contenido del Dockerfile:"
+          cat Dockerfile
+          
+          echo "Contenido del docker-compose.yaml:"
+          cat docker-compose.yaml
+          
+          # Forzar reconstrucción completa desde el Dockerfile
+          echo "Construyendo imagen desde el Dockerfile..."
+          docker-compose build --no-cache api
+          
+          # Ejecutar/actualizar la aplicación
+          echo "Deteniendo contenedores existentes..."
+          docker-compose down
+          
+          echo "Iniciando contenedores con nueva imagen..."
+          docker-compose up -d
+          
+          # Verificar estado
+          echo "Estado de los contenedores:"
+          docker ps
+          
+          # Mostrar logs iniciales
+          echo "Logs del contenedor:"
+          docker-compose logs api --tail=50
+          
+          # Ejecutar migraciones de base de datos si es necesario
+          sleep 10  # Esperar a que los contenedores estén listos
+          docker-compose exec -T api npx prisma migrate deploy
+        '
+    
+    - name: Verify Deployment
+      run: |
+        echo "Verificando que la aplicación está en funcionamiento..."
+        sleep 15  # Dar tiempo para que la aplicación arranque completamente
+        curl -s http://${{ secrets.EC2_HOST }}:3000/api-docs || echo "La aplicación aún no responde. Puede ser necesario revisar los logs."
