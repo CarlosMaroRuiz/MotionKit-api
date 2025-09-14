@@ -6,8 +6,8 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  provider = "mysql"
+  url      = env("DATABASE_URL")
 }
 
 model User {
@@ -20,9 +20,9 @@ model User {
 model Component {
   id            String     @id @default(uuid())
   name          String
-  jsxCode       String     // Renombrado de html a jsxCode
+  jsxCode       String     @db.Text // Renombrado de html a jsxCode - usar TEXT para contenido largo
   type          String     // Nuevo campo para tipo de componente
-  animationCode String?    // Nuevo campo para código de animación (opcional)
+  animationCode String?    @db.Text // Nuevo campo para código de animación (opcional) - usar TEXT
   donations     Donation[]
 }
 

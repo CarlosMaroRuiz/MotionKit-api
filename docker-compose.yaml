@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  # API Node.js
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: component-store-api
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: ${DATABASE_URL}
+      PAYPAL_API_CLIENT: ${PAYPAL_API_CLIENT}
+      PAYPAL_API_SECRET: ${PAYPAL_API_SECRET}
+      PAYPAL_API_URL: ${PAYPAL_API_URL:-https://api.sandbox.paypal.com}
+      HOST: ${HOST:-http://localhost:3000}
+      JWT_SECRET: ${JWT_SECRET}
+    volumes:
+      - ./src/public:/app/src/public:ro
+    command: sh -c "npx prisma migrate deploy && npm start"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api-docs"]
+      timeout: 10s
+      retries: 3
+      start_period: 40s
