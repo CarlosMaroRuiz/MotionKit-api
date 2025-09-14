@@ -2,8 +2,8 @@ name: Deploy to EC2 with Dockerfile
 
 on:
   push:
-    branches: [ main ]  # Ajusta según tu rama principal
-  workflow_dispatch:    # Permite ejecutar el workflow manualmente
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -49,29 +49,76 @@ jobs:
         EOL
         '
     
-    - name: Deploy with Docker
+    - name: Install Docker and deploy
       run: |
         ssh ${{ secrets.EC2_USERNAME }}@${{ secrets.EC2_HOST }} '
           cd ~/component-store-api
           
-          # Verificar si Docker está instalado, si no, instalarlo
-          if ! command -v docker &> /dev/null; then
-            echo "Docker no está instalado. Instalando..."
-            sudo yum update -y
-            sudo amazon-linux-extras install docker -y
-            sudo systemctl start docker
-            sudo systemctl enable docker
-            sudo usermod -a -G docker $USER
-            # Aplicar cambios de grupo
-            sudo su - $USER -c "newgrp docker"
+          # Detectar sistema operativo y instalar Docker en consecuencia
+          if [ -f /etc/os-release ]; then
+            . /etc/os-release
+            echo "Sistema operativo detectado: $NAME"
+            
+            if [[ "$NAME" == *"Ubuntu"* ]] || [[ "$NAME" == *"Debian"* ]]; then
+              echo "Instalando Docker en Ubuntu/Debian..."
+              
+              # Actualizar paquetes
+              sudo apt-get update
+              
+              # Instalar paquetes necesarios
+              sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common
+              
+              # Agregar clave GPG oficial de Docker
+              curl -fsSL https://download.docker.com/linux/$ID/gpg | sudo apt-key add -
+              
+              # Configurar repositorio estable
+              sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/$ID $(lsb_release -cs) stable"
+              
+              # Actualizar índice de paquetes
+              sudo apt-get update
+              
+              # Instalar Docker CE
+              sudo apt-get install -y docker-ce docker-ce-cli containerd.io
+              
+              # Iniciar y habilitar Docker
+              sudo systemctl start docker
+              sudo systemctl enable docker
+              
+              # Agregar usuario actual al grupo docker
+              sudo usermod -aG docker $USER
+              
+              # Instalar Docker Compose
+              sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+              sudo chmod +x /usr/local/bin/docker-compose
+              
+              echo "Docker instalado correctamente"
+            elif [[ "$NAME" == *"Amazon Linux"* ]]; then
+              echo "Instalando Docker en Amazon Linux..."
+              sudo yum update -y
+              sudo amazon-linux-extras install docker -y
+              sudo systemctl start docker
+              sudo systemctl enable docker
+              sudo usermod -a -G docker $USER
+            else
+              echo "Sistema operativo no reconocido: $NAME"
+              echo "Intentando instalación genérica de Docker..."
+              
+              # Intento genérico para otras distribuciones
+              curl -fsSL https://get.docker.com -o get-docker.sh
+              sudo sh get-docker.sh
+              sudo systemctl start docker
+              sudo systemctl enable docker
+              sudo usermod -aG docker $USER
+            fi
+          else
+            echo "No se pudo detectar el sistema operativo"
+            exit 1
           fi
           
-          # Verificar si Docker Compose está instalado, si no, instalarlo
-          if ! command -v docker-compose &> /dev/null; then
-            echo "Docker Compose no está instalado. Instalando..."
-            sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-            sudo chmod +x /usr/local/bin/docker-compose
-          fi
+          # Verificar instalación de Docker
+          echo "Verificando instalación de Docker..."
+          docker --version || echo "Error: Docker no se instaló correctamente"
+          docker-compose --version || echo "Error: Docker Compose no se instaló correctamente"
           
           # Verificar que el Dockerfile existe
           if [ ! -f "Dockerfile" ]; then
@@ -85,28 +132,28 @@ jobs:
           echo "Contenido del docker-compose.yaml:"
           cat docker-compose.yaml
           
-          # Forzar reconstrucción completa desde el Dockerfile
+          # Usar sudo para ejecutar comandos Docker
           echo "Construyendo imagen desde el Dockerfile..."
-          docker-compose build --no-cache api
+          sudo docker-compose build --no-cache
           
           # Ejecutar/actualizar la aplicación
           echo "Deteniendo contenedores existentes..."
-          docker-compose down
+          sudo docker-compose down
           
           echo "Iniciando contenedores con nueva imagen..."
-          docker-compose up -d
+          sudo docker-compose up -d
           
           # Verificar estado
           echo "Estado de los contenedores:"
-          docker ps
+          sudo docker ps
           
           # Mostrar logs iniciales
           echo "Logs del contenedor:"
-          docker-compose logs api --tail=50
+          sudo docker-compose logs api --tail=50
           
           # Ejecutar migraciones de base de datos si es necesario
           sleep 10  # Esperar a que los contenedores estén listos
-          docker-compose exec -T api npx prisma migrate deploy
+          sudo docker-compose exec -T api npx prisma migrate deploy
         '
     
     - name: Verify Deployment
