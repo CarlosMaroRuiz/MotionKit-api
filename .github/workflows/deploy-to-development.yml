@@ -1,4 +1,4 @@
-name: Deploy to Development Server 
+name: Deploy to Development Server
 
 on:
   pull_request:
@@ -25,48 +25,51 @@ jobs:
       with:
         ref: ${{ github.event.inputs.pr_number != '' && format('refs/pull/{0}/head', github.event.inputs.pr_number) || github.head_ref }}
     
-# Eliminamos este paso ya que está causando problemas
-    
-    - name: Prepare deployment directory
+    - name: Prepare and Deploy
       uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ secrets.DEV_VPS_HOST }}
         username: ubuntu
         password: ${{ secrets.DEV_VPS_PASSWORD }}
-        script_stop: false         # No detener en errores del script
-        use_insecure_cipher: true  # Permitir cifrados inseguros si es necesario
-        fingerprint: "" # Deja este valor vacío para evitar verificación
+        key_path: ""
+        debug: true
+        script_stop: false
+        use_insecure_cipher: true
         script: |
-          # Create directory if it doesn't exist
+          # Create and clean directory
           mkdir -p ~/component-store-api-dev
-          
-          # Clean previous directory
           rm -rf ~/component-store-api-dev/*
           
-          echo "Deployment directory prepared"
+          echo "Directory prepared successfully"
     
-    - name: Copy files to Development Server
+    - name: Copy Files
       uses: appleboy/scp-action@v0.1.7
       with:
         host: ${{ secrets.DEV_VPS_HOST }}
         username: ubuntu
         password: ${{ secrets.DEV_VPS_PASSWORD }}
+        debug: true
+        use_insecure_cipher: true
         source: "."
         target: "~/component-store-api-dev/"
         overwrite: true
         rm: false
         exclude: ".git,.github,node_modules"
     
-    - name: Create .env file
+    - name: Deploy with Docker
       uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ secrets.DEV_VPS_HOST }}
         username: ubuntu
         password: ${{ secrets.DEV_VPS_PASSWORD }}
+        key_path: ""
+        debug: true
+        script_stop: false
+        use_insecure_cipher: true
         script: |
           cd ~/component-store-api-dev
           
-          # Create .env file for development
+          # Create .env file
           cat > .env << EOL
           PORT=3000
           PAYPAL_API_CLIENT=${{ secrets.PAYPAL_API_CLIENT }}
@@ -78,77 +81,23 @@ jobs:
           NODE_ENV=development
           EOL
           
-          echo "Environment file created"
-    
-    - name: Check Docker Installation
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.DEV_VPS_HOST }}
-        username: ubuntu
-        password: ${{ secrets.DEV_VPS_PASSWORD }}
-        script: |
-          # Check if Docker is installed
-          if ! command -v docker &> /dev/null || ! command -v docker-compose &> /dev/null; then
-            echo "Docker or docker-compose not found, installing..."
-            
-            # Update package index
+          # Install Docker if needed
+          if ! command -v docker &> /dev/null; then
             sudo apt-get update
-            
-            # Install required packages
             sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common
-            
-            # Add Docker's official GPG key
             curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
-            
-            # Set up the stable Docker repository
             sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
-            
-            # Update the package index again
             sudo apt-get update
-            
-            # Install Docker CE
-            sudo apt-get install -y docker-ce docker-ce-cli containerd.io
-            
-            # Start and enable Docker
+            sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose
             sudo systemctl start docker
             sudo systemctl enable docker
-            
-            # Add the current user to the Docker group
-            sudo usermod -aG docker $USER
-            
-            # Install Docker Compose
-            sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-            sudo chmod +x /usr/local/bin/docker-compose
-            
-            echo "Docker installation completed"
-          else
-            echo "Docker is already installed"
           fi
           
-          # Verify Docker installation
-          docker --version && docker-compose --version || { echo "Docker verification failed"; exit 1; }
-    
-    - name: Deploy with Docker Compose
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.DEV_VPS_HOST }}
-        username: ubuntu
-        password: ${{ secrets.DEV_VPS_PASSWORD }}
-        script: |
-          cd ~/component-store-api-dev
-          
-          # Check if Dockerfile exists
-          if [ ! -f "Dockerfile" ]; then
-            echo "Error: Dockerfile not found in the directory"
-            exit 1
-          fi
-          
-          # Create docker-compose for development
+          # Create docker-compose file
           cat > docker-compose.dev.yaml << 'EOL'
           version: "3.8"
 
           services:
-            # Node.js API for development
             api-dev:
               build:
                 context: .
@@ -169,82 +118,26 @@ jobs:
               volumes:
                 - ./src/public:/app/src/public:ro
               command: sh -c "npx prisma migrate deploy && npm run dev"
-              healthcheck:
-                test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api-docs"]
-                interval: 30s
-                timeout: 10s
-                retries: 3
-                start_period: 40s
           EOL
           
-          echo "docker-compose.dev.yaml created"
-          
-          # Build and deploy
-          echo "Building development image..."
+          # Build and run
+          sudo docker-compose -f docker-compose.dev.yaml down || true
           sudo docker-compose -f docker-compose.dev.yaml build --no-cache
-          
-          echo "Stopping existing containers..."
-          sudo docker-compose -f docker-compose.dev.yaml down
-          
-          echo "Starting development containers..."
           sudo docker-compose -f docker-compose.dev.yaml up -d
           
-          # Wait for container to start
-          echo "Waiting for container to start..."
+          # Run migrations
           sleep 15
+          sudo docker-compose -f docker-compose.dev.yaml exec -T api-dev npx prisma migrate deploy || echo "Migrations already applied"
           
-          # Check container status
-          if ! sudo docker ps | grep -q component-store-api-dev; then
-            echo "Container not running, checking logs..."
-            sudo docker-compose -f docker-compose.dev.yaml logs api-dev
-            exit 1
-          fi
-          
-          # Run database migrations if needed
-          echo "Running database migrations..."
-          sudo docker-compose -f docker-compose.dev.yaml exec -T api-dev npx prisma migrate deploy || echo "Migrations already applied or there was an error"
-          
-          echo "Development deployment successful"
-    
-    - name: Verify Development Deployment
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.DEV_VPS_HOST }}
-        username: ubuntu
-        password: ${{ secrets.DEV_VPS_PASSWORD }}
-        script: |
-          # Wait for application to fully start
-          sleep 20
-          
-          # Verify endpoint is responding
-          if curl -s http://localhost:3001/api-docs > /dev/null; then
-            echo "Application successfully deployed and responding"
+          # Verify deployment
+          sleep 10
+          if sudo docker ps | grep -q component-store-api-dev; then
+            echo "Container running successfully"
           else
-            echo "Application is not responding. Checking logs..."
-            sudo docker-compose -f ~/component-store-api-dev/docker-compose.dev.yaml logs api-dev --tail=50
-            exit 1
+            echo "Container failed to start"
+            sudo docker-compose -f docker-compose.dev.yaml logs
           fi
-    
-    - name: Deployment Summary
-      run: |
-        echo "Deployment to development environment completed"
-        echo "Application URL: http://${{ secrets.DEV_VPS_HOST }}:3001"
-        echo "API Documentation: http://${{ secrets.DEV_VPS_HOST }}:3001/api-docs"
-
-  cleanup-old-deployments:
-    runs-on: ubuntu-latest
-    needs: deploy-development
-    if: success()
-    
-    steps:
-    - name: Cleanup old Docker images
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.DEV_VPS_HOST }}
-        username: ubuntu
-        password: ${{ secrets.DEV_VPS_PASSWORD }}
-        script: |
-          echo "Cleaning up old Docker images..."
+          
+          # Cleanup
           sudo docker image prune -f
           sudo docker system prune -f
-          echo "Cleanup completed"
