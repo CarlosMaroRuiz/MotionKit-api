@@ -12,233 +12,218 @@ on:
         type: string
 
 jobs:
-  deploy-staging:
+  deploy-development:
     runs-on: ubuntu-latest
     
     environment:
       name: development
-      url: http://148.113.180.137:3000
+      url: http://${{ secrets.DEV_VPS_HOST }}:3001 
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
       with:
-        ref: ${{ github.head_ref }}
+        ref: ${{ github.event.inputs.pr_number ? 'refs/pull/${{ github.event.inputs.pr_number }}/head' : github.head_ref }}
     
-    - name: Setup SSH
-      uses: webfactory/ssh-agent@v0.7.0
+    - name: Setup and Deploy to Development Server
+      uses: appleboy/ssh-action@v1.0.3
       with:
-        ssh-private-key: ${{ secrets.DEV_VPS_SSH_KEY }}
-    
-    - name: Add host key to known hosts
-      run: |
-        mkdir -p ~/.ssh
-        ssh-keyscan ${{ secrets.DEV_VPS_HOST }} >> ~/.ssh/known_hosts
-    
-    - name: Setup remote directory
-      run: |
-        ssh ubuntu@${{ secrets.DEV_VPS_HOST }} '
-          if [ ! -d "~/component-store-api-dev" ]; then
-            mkdir -p ~/component-store-api-dev
-          fi
-        '
+        host: ${{ secrets.DEV_VPS_HOST }}
+        username: ubuntu
+        key: ${{ secrets.DEV_VPS_SSH_KEY }}
+        script: |
+          # Create directory if it doesn't exist
+          mkdir -p ~/component-store-api-dev
+          
+          # Clean previous directory
+          rm -rf ~/component-store-api-dev/*
     
     - name: Copy files to Development Server
-      run: |
-        rsync -avz --exclude='.git' --exclude='.github' --exclude='node_modules' ./ ubuntu@${{ secrets.DEV_VPS_HOST }}:~/component-store-api-dev/
+      uses: appleboy/scp-action@v0.1.7
+      with:
+        host: ${{ secrets.DEV_VPS_HOST }}
+        username: ubuntu
+        key: ${{ secrets.DEV_VPS_SSH_KEY }}
+        source: "."
+        target: "~/component-store-api-dev/"
+        overwrite: true
+        rm: false
+        exclude: ".git,.github,node_modules"
     
-    - name: Create .env file for Development
-      run: |
-        ssh ubuntu@${{ secrets.DEV_VPS_HOST }} '
-          cat > ~/component-store-api-dev/.env << EOL
-        PORT=3001
-        PAYPAL_API_CLIENT=${{ secrets.PAYPAL_API_CLIENT }}
-        PAYPAL_API_SECRET=${{ secrets.PAYPAL_API_SECRET }}
-        PAYPAL_API_URL=https://api.sandbox.paypal.com
-        HOST=http://${{ secrets.DEV_VPS_HOST }}:3001
-        JWT_SECRET=${{ secrets.JWT_SECRET }}
-        DATABASE_URL=${{ secrets.DATABASE_URL }}
-        NODE_ENV=development
-        EOL
-        '
-    
-    - name: Install Docker and deploy to Development
-      run: |
-        ssh ubuntu@${{ secrets.DEV_VPS_HOST }} '
+    - name: Create .env file and Deploy
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.DEV_VPS_HOST }}
+        username: ubuntu
+        key: ${{ secrets.DEV_VPS_SSH_KEY }}
+        script: |
           cd ~/component-store-api-dev
           
-          # Detectar sistema operativo y instalar Docker si no existe
-          if ! command -v docker &> /dev/null; then
-            echo "Docker no encontrado, instalando..."
+          # Create .env file for development
+          cat > .env << EOL
+          PORT=3000
+          PAYPAL_API_CLIENT=${{ secrets.PAYPAL_API_CLIENT }}
+          PAYPAL_API_SECRET=${{ secrets.PAYPAL_API_SECRET }}
+          PAYPAL_API_URL=https://api.sandbox.paypal.com
+          HOST=http://${{ secrets.DEV_VPS_HOST }}:3001
+          JWT_SECRET=${{ secrets.JWT_SECRET }}
+          DATABASE_URL=${{ secrets.DATABASE_URL }}
+          NODE_ENV=development
+          EOL
+    
+    - name: Check Docker Installation
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.DEV_VPS_HOST }}
+        username: ubuntu
+        key: ${{ secrets.DEV_VPS_SSH_KEY }}
+        script: |
+          # Check if Docker is installed
+          if ! command -v docker &> /dev/null || ! command -v docker-compose &> /dev/null; then
+            echo "Docker or docker-compose not found, installing..."
             
-            if [ -f /etc/os-release ]; then
-              . /etc/os-release
-              echo "Sistema operativo detectado: $NAME"
-              
-              if [[ "$NAME" == *"Ubuntu"* ]] || [[ "$NAME" == *"Debian"* ]]; then
-                echo "Instalando Docker en Ubuntu/Debian..."
-                
-                # Actualizar paquetes
-                sudo apt-get update
-                
-                # Instalar paquetes necesarios
-                sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common
-                
-                # Agregar clave GPG oficial de Docker
-                curl -fsSL https://download.docker.com/linux/$ID/gpg | sudo apt-key add -
-                
-                # Configurar repositorio estable
-                sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/$ID $(lsb_release -cs) stable"
-                
-                # Actualizar índice de paquetes
-                sudo apt-get update
-                
-                # Instalar Docker CE
-                sudo apt-get install -y docker-ce docker-ce-cli containerd.io
-                
-                # Iniciar y habilitar Docker
-                sudo systemctl start docker
-                sudo systemctl enable docker
-                
-                # Agregar usuario actual al grupo docker
-                sudo usermod -aG docker $USER
-                
-                # Instalar Docker Compose
-                sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-                sudo chmod +x /usr/local/bin/docker-compose
-                
-                echo "Docker instalado correctamente"
-              else
-                echo "Sistema operativo no soportado para instalación automática"
-                exit 1
-              fi
-            else
-              echo "No se pudo detectar el sistema operativo"
-              exit 1
-            fi
+            # Update package index
+            sudo apt-get update
+            
+            # Install required packages
+            sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common
+            
+            # Add Docker's official GPG key
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+            
+            # Set up the stable Docker repository
+            sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+            
+            # Update the package index again
+            sudo apt-get update
+            
+            # Install Docker CE
+            sudo apt-get install -y docker-ce docker-ce-cli containerd.io
+            
+            # Start and enable Docker
+            sudo systemctl start docker
+            sudo systemctl enable docker
+            
+            # Add the current user to the Docker group
+            sudo usermod -aG docker $USER
+            
+            # Install Docker Compose
+            sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+            sudo chmod +x /usr/local/bin/docker-compose
+            
+            echo "Docker installation completed"
           else
-            echo "Docker ya está instalado"
+            echo "Docker is already installed"
           fi
           
-          # Verificar instalación de Docker
-          echo "Verificando instalación de Docker..."
-          docker --version || echo "Error: Docker no funciona correctamente"
+          # Verify Docker installation
+          docker --version && docker-compose --version || { echo "Docker verification failed"; exit 1; }
+    
+    - name: Deploy with Docker Compose
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.DEV_VPS_HOST }}
+        username: ubuntu
+        key: ${{ secrets.DEV_VPS_SSH_KEY }}
+        script: |
+          cd ~/component-store-api-dev
           
-          # Verificar que el Dockerfile existe
+          # Check if Dockerfile exists
           if [ ! -f "Dockerfile" ]; then
-            echo "Error: Dockerfile no encontrado en el directorio"
+            echo "Error: Dockerfile not found in the directory"
             exit 1
           fi
           
-          # Crear docker-compose específico para desarrollo
-          cat > docker-compose.dev.yaml << EOL
-        version: "3.8"
+          # Create docker-compose for development
+          cat > docker-compose.dev.yaml << 'EOL'
+          version: "3.8"
 
-        services:
-          # API Node.js para desarrollo
-          api-dev:
-            build:
-              context: .
-              dockerfile: Dockerfile
-            container_name: component-store-api-dev
-            restart: unless-stopped
-            ports:
-              - "3001:3000"
-            environment:
-              NODE_ENV: development
-              PORT: 3000
-              DATABASE_URL: \${DATABASE_URL}
-              PAYPAL_API_CLIENT: \${PAYPAL_API_CLIENT}
-              PAYPAL_API_SECRET: \${PAYPAL_API_SECRET}
-              PAYPAL_API_URL: \${PAYPAL_API_URL}
-              HOST: \${HOST}
-              JWT_SECRET: \${JWT_SECRET}
-            volumes:
-              - ./src/public:/app/src/public:ro
-            command: sh -c "npx prisma migrate deploy && npm run dev"
-            healthcheck:
-              test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api-docs"]
-              timeout: 10s
-              retries: 3
-              start_period: 40s
-        EOL
+          services:
+            # Node.js API for development
+            api-dev:
+              build:
+                context: .
+                dockerfile: Dockerfile
+              container_name: component-store-api-dev
+              restart: unless-stopped
+              ports:
+                - "3001:3000"
+              environment:
+                NODE_ENV: development
+                PORT: 3000
+                DATABASE_URL: ${DATABASE_URL}
+                PAYPAL_API_CLIENT: ${PAYPAL_API_CLIENT}
+                PAYPAL_API_SECRET: ${PAYPAL_API_SECRET}
+                PAYPAL_API_URL: ${PAYPAL_API_URL}
+                HOST: ${HOST}
+                JWT_SECRET: ${JWT_SECRET}
+              volumes:
+                - ./src/public:/app/src/public:ro
+              command: sh -c "npx prisma migrate deploy && npm run dev"
+              healthcheck:
+                test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api-docs"]
+                interval: 30s
+                timeout: 10s
+                retries: 3
+                start_period: 40s
+          EOL
           
-          echo "Contenido del docker-compose.dev.yaml:"
-          cat docker-compose.dev.yaml
-          
-          # Usar sudo para ejecutar comandos Docker
-          echo "Construyendo imagen para desarrollo..."
+          # Build and deploy
+          echo "Building development image..."
           sudo docker-compose -f docker-compose.dev.yaml build --no-cache
           
-          # Ejecutar/actualizar la aplicación de desarrollo
-          echo "Deteniendo contenedores de desarrollo existentes..."
+          echo "Stopping existing containers..."
           sudo docker-compose -f docker-compose.dev.yaml down
           
-          echo "Iniciando contenedores de desarrollo..."
+          echo "Starting development containers..."
           sudo docker-compose -f docker-compose.dev.yaml up -d
           
-          # Verificar estado
-          echo "Estado de los contenedores de desarrollo:"
-          sudo docker ps | grep component-store-api-dev
+          # Wait for container to start
+          echo "Waiting for container to start..."
+          sleep 15
           
-          # Mostrar logs iniciales
-          echo "Logs del contenedor de desarrollo:"
-          sudo docker-compose -f docker-compose.dev.yaml logs api-dev --tail=30
+          # Check container status
+          if ! sudo docker ps | grep -q component-store-api-dev; then
+            echo "Container not running, checking logs..."
+            sudo docker-compose -f docker-compose.dev.yaml logs api-dev
+            exit 1
+          fi
           
-          # Ejecutar migraciones de base de datos si es necesario
-          sleep 15  # Esperar a que los contenedores estén listos
-          echo "Ejecutando migraciones de desarrollo..."
-          sudo docker-compose -f docker-compose.dev.yaml exec -T api-dev npx prisma migrate deploy || echo "Las migraciones ya están aplicadas o hay un error"
-        '
+          echo "Development deployment successful"
     
     - name: Verify Development Deployment
-      run: |
-        echo "Verificando que la aplicación de desarrollo está en funcionamiento..."
-        sleep 20  # Dar tiempo para que la aplicación arranque completamente
-        
-        # Verificar que el endpoint responde
-        if curl -s http://${{ secrets.DEV_VPS_HOST }}:3001/api-docs > /dev/null; then
-          echo "Aplicación de desarrollo desplegada correctamente en http://${{ secrets.DEV_VPS_HOST }}:3001"
-        else
-          echo "La aplicación de desarrollo no responde. Revisando logs..."
-          ssh ubuntu@${{ secrets.DEV_VPS_HOST }} 'sudo docker-compose -f ~/component-store-api-dev/docker-compose.dev.yaml logs api-dev --tail=50'
-        fi
-    
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.DEV_VPS_HOST }}
+        username: ubuntu
+        key: ${{ secrets.DEV_VPS_SSH_KEY }}
+        script: |
+          # Wait for application to fully start
+          sleep 20
+          
+          # Verify endpoint is responding
+          if curl -s http://localhost:3001/api-docs > /dev/null; then
+            echo "Application successfully deployed and responding"
+          else
+            echo "Application is not responding. Checking logs..."
+            sudo docker-compose -f ~/component-store-api-dev/docker-compose.dev.yaml logs api-dev --tail=50
+            exit 1
+          fi
 
-    - name: Update deployment status
-      if: always()
-      run: |
-        if [ "${{ job.status }}" == "success" ]; then
-          echo "Development deployment completed successfully"
-          echo "Application available at: http://${{ secrets.DEV_VPS_HOST }}:3001"
-          echo "API Documentation: http://${{ secrets.DEV_VPS_HOST }}:3001/api-docs"
-        else
-          echo "Development deployment failed"
-          echo "Check the logs above for details"
-        fi
-
-  # Job opcional para limpiar deployments antiguos
   cleanup-old-deployments:
     runs-on: ubuntu-latest
-    needs: deploy-staging
+    needs: deploy-development
     if: always()
     
     steps:
-    - name: Setup SSH for cleanup
-      uses: webfactory/ssh-agent@v0.7.0
-      with:
-        ssh-private-key: ${{ secrets.DEV_VPS_SSH_KEY }}
-    
-    - name: Add host key to known hosts
-      run: |
-        mkdir -p ~/.ssh
-        ssh-keyscan ${{ secrets.DEV_VPS_HOST }} >> ~/.ssh/known_hosts
-    
     - name: Cleanup old Docker images
-      run: |
-        ssh ubuntu@${{ secrets.DEV_VPS_HOST }} '
-          echo "Limpiando imágenes Docker antiguas..."
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.DEV_VPS_HOST }}
+        username: ubuntu
+        key: ${{ secrets.DEV_VPS_SSH_KEY }}
+        script: |
+          echo "Cleaning up old Docker images..."
           sudo docker image prune -f
           sudo docker system prune -f
-          echo "Limpieza completada"
-        '
+          echo "Cleanup completed"
