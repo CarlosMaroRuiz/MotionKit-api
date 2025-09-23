@@ -17,7 +17,7 @@ jobs:
     
     environment:
       name: development
-      url: http://${{ secrets.DEV_VPS_HOST }}:3001 
+      url: http://${{ secrets.DEV_VPS_HOST }}:3001
     
     steps:
     - name: Checkout code
@@ -25,37 +25,45 @@ jobs:
       with:
         ref: ${{ github.event.inputs.pr_number != '' && format('refs/pull/{0}/head', github.event.inputs.pr_number) || github.head_ref }}
     
-    - name: Setup and Deploy to Development Server
+    - name: Setup SSH known hosts
+      run: |
+        mkdir -p ~/.ssh
+        ssh-keyscan -H ${{ secrets.DEV_VPS_HOST }} >> ~/.ssh/known_hosts
+        chmod 600 ~/.ssh/known_hosts
+    
+    - name: Prepare deployment directory
       uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ secrets.DEV_VPS_HOST }}
         username: ubuntu
-        key: ${{ secrets.DEV_VPS_SSH_KEY }}
+        password: ${{ secrets.DEV_VPS_PASSWORD }}
         script: |
           # Create directory if it doesn't exist
           mkdir -p ~/component-store-api-dev
           
           # Clean previous directory
           rm -rf ~/component-store-api-dev/*
+          
+          echo "Deployment directory prepared"
     
     - name: Copy files to Development Server
       uses: appleboy/scp-action@v0.1.7
       with:
         host: ${{ secrets.DEV_VPS_HOST }}
         username: ubuntu
-        key: ${{ secrets.DEV_VPS_SSH_KEY }}
+        password: ${{ secrets.DEV_VPS_PASSWORD }}
         source: "."
         target: "~/component-store-api-dev/"
         overwrite: true
         rm: false
         exclude: ".git,.github,node_modules"
     
-    - name: Create .env file and Deploy
+    - name: Create .env file
       uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ secrets.DEV_VPS_HOST }}
         username: ubuntu
-        key: ${{ secrets.DEV_VPS_SSH_KEY }}
+        password: ${{ secrets.DEV_VPS_PASSWORD }}
         script: |
           cd ~/component-store-api-dev
           
@@ -70,13 +78,15 @@ jobs:
           DATABASE_URL=${{ secrets.DATABASE_URL }}
           NODE_ENV=development
           EOL
+          
+          echo "Environment file created"
     
     - name: Check Docker Installation
       uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ secrets.DEV_VPS_HOST }}
         username: ubuntu
-        key: ${{ secrets.DEV_VPS_SSH_KEY }}
+        password: ${{ secrets.DEV_VPS_PASSWORD }}
         script: |
           # Check if Docker is installed
           if ! command -v docker &> /dev/null || ! command -v docker-compose &> /dev/null; then
@@ -124,7 +134,7 @@ jobs:
       with:
         host: ${{ secrets.DEV_VPS_HOST }}
         username: ubuntu
-        key: ${{ secrets.DEV_VPS_SSH_KEY }}
+        password: ${{ secrets.DEV_VPS_PASSWORD }}
         script: |
           cd ~/component-store-api-dev
           
@@ -168,6 +178,8 @@ jobs:
                 start_period: 40s
           EOL
           
+          echo "docker-compose.dev.yaml created"
+          
           # Build and deploy
           echo "Building development image..."
           sudo docker-compose -f docker-compose.dev.yaml build --no-cache
@@ -189,6 +201,10 @@ jobs:
             exit 1
           fi
           
+          # Run database migrations if needed
+          echo "Running database migrations..."
+          sudo docker-compose -f docker-compose.dev.yaml exec -T api-dev npx prisma migrate deploy || echo "Migrations already applied or there was an error"
+          
           echo "Development deployment successful"
     
     - name: Verify Development Deployment
@@ -196,7 +212,7 @@ jobs:
       with:
         host: ${{ secrets.DEV_VPS_HOST }}
         username: ubuntu
-        key: ${{ secrets.DEV_VPS_SSH_KEY }}
+        password: ${{ secrets.DEV_VPS_PASSWORD }}
         script: |
           # Wait for application to fully start
           sleep 20
@@ -209,11 +225,17 @@ jobs:
             sudo docker-compose -f ~/component-store-api-dev/docker-compose.dev.yaml logs api-dev --tail=50
             exit 1
           fi
+    
+    - name: Deployment Summary
+      run: |
+        echo "Deployment to development environment completed"
+        echo "Application URL: http://${{ secrets.DEV_VPS_HOST }}:3001"
+        echo "API Documentation: http://${{ secrets.DEV_VPS_HOST }}:3001/api-docs"
 
   cleanup-old-deployments:
     runs-on: ubuntu-latest
     needs: deploy-development
-    if: always()
+    if: success()
     
     steps:
     - name: Cleanup old Docker images
@@ -221,7 +243,7 @@ jobs:
       with:
         host: ${{ secrets.DEV_VPS_HOST }}
         username: ubuntu
-        key: ${{ secrets.DEV_VPS_SSH_KEY }}
+        password: ${{ secrets.DEV_VPS_PASSWORD }}
         script: |
           echo "Cleaning up old Docker images..."
           sudo docker image prune -f
