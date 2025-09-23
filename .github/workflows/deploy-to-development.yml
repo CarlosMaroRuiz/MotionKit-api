@@ -1,0 +1,244 @@
+name: Deploy to Development Server (PR)
+
+on:
+  pull_request:
+    branches: [ develop ]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to deploy (optional)'
+        required: false
+        type: string
+
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    
+    environment:
+      name: development
+      url: http://148.113.180.137:3000
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      with:
+        ref: ${{ github.head_ref }}
+    
+    - name: Setup SSH
+      uses: webfactory/ssh-agent@v0.7.0
+      with:
+        ssh-private-key: ${{ secrets.DEV_VPS_SSH_KEY }}
+    
+    - name: Add host key to known hosts
+      run: |
+        mkdir -p ~/.ssh
+        ssh-keyscan ${{ secrets.DEV_VPS_HOST }} >> ~/.ssh/known_hosts
+    
+    - name: Setup remote directory
+      run: |
+        ssh ubuntu@${{ secrets.DEV_VPS_HOST }} '
+          if [ ! -d "~/component-store-api-dev" ]; then
+            mkdir -p ~/component-store-api-dev
+          fi
+        '
+    
+    - name: Copy files to Development Server
+      run: |
+        rsync -avz --exclude='.git' --exclude='.github' --exclude='node_modules' ./ ubuntu@${{ secrets.DEV_VPS_HOST }}:~/component-store-api-dev/
+    
+    - name: Create .env file for Development
+      run: |
+        ssh ubuntu@${{ secrets.DEV_VPS_HOST }} '
+          cat > ~/component-store-api-dev/.env << EOL
+        PORT=3001
+        PAYPAL_API_CLIENT=${{ secrets.PAYPAL_API_CLIENT }}
+        PAYPAL_API_SECRET=${{ secrets.PAYPAL_API_SECRET }}
+        PAYPAL_API_URL=https://api.sandbox.paypal.com
+        HOST=http://${{ secrets.DEV_VPS_HOST }}:3001
+        JWT_SECRET=${{ secrets.JWT_SECRET }}
+        DATABASE_URL=${{ secrets.DATABASE_URL }}
+        NODE_ENV=development
+        EOL
+        '
+    
+    - name: Install Docker and deploy to Development
+      run: |
+        ssh ubuntu@${{ secrets.DEV_VPS_HOST }} '
+          cd ~/component-store-api-dev
+          
+          # Detectar sistema operativo y instalar Docker si no existe
+          if ! command -v docker &> /dev/null; then
+            echo "Docker no encontrado, instalando..."
+            
+            if [ -f /etc/os-release ]; then
+              . /etc/os-release
+              echo "Sistema operativo detectado: $NAME"
+              
+              if [[ "$NAME" == *"Ubuntu"* ]] || [[ "$NAME" == *"Debian"* ]]; then
+                echo "Instalando Docker en Ubuntu/Debian..."
+                
+                # Actualizar paquetes
+                sudo apt-get update
+                
+                # Instalar paquetes necesarios
+                sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common
+                
+                # Agregar clave GPG oficial de Docker
+                curl -fsSL https://download.docker.com/linux/$ID/gpg | sudo apt-key add -
+                
+                # Configurar repositorio estable
+                sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/$ID $(lsb_release -cs) stable"
+                
+                # Actualizar índice de paquetes
+                sudo apt-get update
+                
+                # Instalar Docker CE
+                sudo apt-get install -y docker-ce docker-ce-cli containerd.io
+                
+                # Iniciar y habilitar Docker
+                sudo systemctl start docker
+                sudo systemctl enable docker
+                
+                # Agregar usuario actual al grupo docker
+                sudo usermod -aG docker $USER
+                
+                # Instalar Docker Compose
+                sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+                sudo chmod +x /usr/local/bin/docker-compose
+                
+                echo "Docker instalado correctamente"
+              else
+                echo "Sistema operativo no soportado para instalación automática"
+                exit 1
+              fi
+            else
+              echo "No se pudo detectar el sistema operativo"
+              exit 1
+            fi
+          else
+            echo "Docker ya está instalado"
+          fi
+          
+          # Verificar instalación de Docker
+          echo "Verificando instalación de Docker..."
+          docker --version || echo "Error: Docker no funciona correctamente"
+          
+          # Verificar que el Dockerfile existe
+          if [ ! -f "Dockerfile" ]; then
+            echo "Error: Dockerfile no encontrado en el directorio"
+            exit 1
+          fi
+          
+          # Crear docker-compose específico para desarrollo
+          cat > docker-compose.dev.yaml << EOL
+        version: "3.8"
+
+        services:
+          # API Node.js para desarrollo
+          api-dev:
+            build:
+              context: .
+              dockerfile: Dockerfile
+            container_name: component-store-api-dev
+            restart: unless-stopped
+            ports:
+              - "3001:3000"
+            environment:
+              NODE_ENV: development
+              PORT: 3000
+              DATABASE_URL: \${DATABASE_URL}
+              PAYPAL_API_CLIENT: \${PAYPAL_API_CLIENT}
+              PAYPAL_API_SECRET: \${PAYPAL_API_SECRET}
+              PAYPAL_API_URL: \${PAYPAL_API_URL}
+              HOST: \${HOST}
+              JWT_SECRET: \${JWT_SECRET}
+            volumes:
+              - ./src/public:/app/src/public:ro
+            command: sh -c "npx prisma migrate deploy && npm run dev"
+            healthcheck:
+              test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/api-docs"]
+              timeout: 10s
+              retries: 3
+              start_period: 40s
+        EOL
+          
+          echo "Contenido del docker-compose.dev.yaml:"
+          cat docker-compose.dev.yaml
+          
+          # Usar sudo para ejecutar comandos Docker
+          echo "Construyendo imagen para desarrollo..."
+          sudo docker-compose -f docker-compose.dev.yaml build --no-cache
+          
+          # Ejecutar/actualizar la aplicación de desarrollo
+          echo "Deteniendo contenedores de desarrollo existentes..."
+          sudo docker-compose -f docker-compose.dev.yaml down
+          
+          echo "Iniciando contenedores de desarrollo..."
+          sudo docker-compose -f docker-compose.dev.yaml up -d
+          
+          # Verificar estado
+          echo "Estado de los contenedores de desarrollo:"
+          sudo docker ps | grep component-store-api-dev
+          
+          # Mostrar logs iniciales
+          echo "Logs del contenedor de desarrollo:"
+          sudo docker-compose -f docker-compose.dev.yaml logs api-dev --tail=30
+          
+          # Ejecutar migraciones de base de datos si es necesario
+          sleep 15  # Esperar a que los contenedores estén listos
+          echo "Ejecutando migraciones de desarrollo..."
+          sudo docker-compose -f docker-compose.dev.yaml exec -T api-dev npx prisma migrate deploy || echo "Las migraciones ya están aplicadas o hay un error"
+        '
+    
+    - name: Verify Development Deployment
+      run: |
+        echo "Verificando que la aplicación de desarrollo está en funcionamiento..."
+        sleep 20  # Dar tiempo para que la aplicación arranque completamente
+        
+        # Verificar que el endpoint responde
+        if curl -s http://${{ secrets.DEV_VPS_HOST }}:3001/api-docs > /dev/null; then
+          echo "Aplicación de desarrollo desplegada correctamente en http://${{ secrets.DEV_VPS_HOST }}:3001"
+        else
+          echo "La aplicación de desarrollo no responde. Revisando logs..."
+          ssh ubuntu@${{ secrets.DEV_VPS_HOST }} 'sudo docker-compose -f ~/component-store-api-dev/docker-compose.dev.yaml logs api-dev --tail=50'
+        fi
+    
+
+    - name: Update deployment status
+      if: always()
+      run: |
+        if [ "${{ job.status }}" == "success" ]; then
+          echo "Development deployment completed successfully"
+          echo "Application available at: http://${{ secrets.DEV_VPS_HOST }}:3001"
+          echo "API Documentation: http://${{ secrets.DEV_VPS_HOST }}:3001/api-docs"
+        else
+          echo "Development deployment failed"
+          echo "Check the logs above for details"
+        fi
+
+  # Job opcional para limpiar deployments antiguos
+  cleanup-old-deployments:
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    if: always()
+    
+    steps:
+    - name: Setup SSH for cleanup
+      uses: webfactory/ssh-agent@v0.7.0
+      with:
+        ssh-private-key: ${{ secrets.DEV_VPS_SSH_KEY }}
+    
+    - name: Add host key to known hosts
+      run: |
+        mkdir -p ~/.ssh
+        ssh-keyscan ${{ secrets.DEV_VPS_HOST }} >> ~/.ssh/known_hosts
+    
+    - name: Cleanup old Docker images
+      run: |
+        ssh ubuntu@${{ secrets.DEV_VPS_HOST }} '
+          echo "Limpiando imágenes Docker antiguas..."
+          sudo docker image prune -f
+          sudo docker system prune -f
+          echo "Limpieza completada"
+        '
