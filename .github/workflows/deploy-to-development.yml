@@ -23,7 +23,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
       with:
-        ref: ${{ github.event.inputs.pr_number ? 'refs/pull/${{ github.event.inputs.pr_number }}/head' : github.head_ref }}
+        ref: ${{ github.event.inputs.pr_number != '' && format('refs/pull/{0}/head', github.event.inputs.pr_number) || github.head_ref }}
     
     - name: Setup and Deploy to Development Server
       uses: appleboy/ssh-action@v1.0.3
