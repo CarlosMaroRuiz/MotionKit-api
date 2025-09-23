@@ -1,4 +1,4 @@
-name: Deploy to Development Server (PR)
+name: Deploy to Development Server 
 
 on:
   pull_request:
