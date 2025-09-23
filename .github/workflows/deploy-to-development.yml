@@ -24,13 +24,19 @@ jobs:
       uses: actions/checkout@v3
       with:
         ref: ${{ github.event.inputs.pr_number != '' && format('refs/pull/{0}/head', github.event.inputs.pr_number) || github.head_ref }}
+        
+    - name: Setup SSH known hosts
+      run: |
+        mkdir -p ~/.ssh
+        ssh-keyscan -H ${{ secrets.DEV_VPS_HOST }} >> ~/.ssh/known_hosts
+        chmod 600 ~/.ssh/known_hosts
     
     - name: Setup and Deploy to Development Server
       uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ secrets.DEV_VPS_HOST }}
         username: ubuntu
-        key: ${{ secrets.DEV_VPS_SSH_KEY }}
+        password: ${{ secrets.DEV_VPS_PASSWORD }}
         script: |
           # Create directory if it doesn't exist
           mkdir -p ~/component-store-api-dev
