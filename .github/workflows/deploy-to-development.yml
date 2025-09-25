@@ -24,48 +24,47 @@ jobs:
       with:
         ref: ${{ github.event.inputs.pr_number != '' && format('refs/pull/{0}/head', github.event.inputs.pr_number) || github.head_ref }}
     
-    - name: Setup SSH
-      uses: webfactory/ssh-agent@v0.7.0
-      with:
-        ssh-private-key: ${{ secrets.DEV_VPS_SSH_KEY }}
-    
-    # Agregar el host key al known_hosts
-    - name: Add host key to known hosts
-      run: |
-        mkdir -p ~/.ssh
-        ssh-keyscan -H ${{ secrets.DEV_VPS_HOST }} >> ~/.ssh/known_hosts
-        chmod 600 ~/.ssh/known_hosts
-    
     - name: Setup remote directory
-      run: |
-        ssh ubuntu@${{ secrets.DEV_VPS_HOST }} '
+      uses: appleboy/ssh-action@v0.1.7
+      with:
+        host: ${{ secrets.DEV_VPS_HOST }}
+        username: ubuntu
+        key: ${{ secrets.DEV_VPS_SSH_KEY }}
+        script: |
           mkdir -p ~/component-store-api-dev
           rm -rf ~/component-store-api-dev/*
-        '
     
     - name: Copy files to VPS
-      run: |
-        rsync -avz --exclude='.git' --exclude='.github' --exclude='node_modules' ./ ubuntu@${{ secrets.DEV_VPS_HOST }}:~/component-store-api-dev/
+      uses: appleboy/scp-action@v0.1.4
+      with:
+        host: ${{ secrets.DEV_VPS_HOST }}
+        username: ubuntu
+        key: ${{ secrets.DEV_VPS_SSH_KEY }}
+        source: "./"
+        target: "~/component-store-api-dev/"
+        rm: true
+        strip_components: 1
     
-    - name: Create .env file
-      run: |
-        ssh ubuntu@${{ secrets.DEV_VPS_HOST }} '
-          cat > ~/component-store-api-dev/.env << EOL
-        PORT=3000
-        PAYPAL_API_CLIENT=${{ secrets.PAYPAL_API_CLIENT }}
-        PAYPAL_API_SECRET=${{ secrets.PAYPAL_API_SECRET }}
-        PAYPAL_API_URL=https://api.sandbox.paypal.com
-        HOST=http://${{ secrets.DEV_VPS_HOST }}:3001
-        JWT_SECRET=${{ secrets.JWT_SECRET }}
-        DATABASE_URL=${{ secrets.DATABASE_URL }}
-        NODE_ENV=development
-        EOL
-        '
-    
-    - name: Install Docker and deploy
-      run: |
-        ssh ubuntu@${{ secrets.DEV_VPS_HOST }} '
+    - name: Create .env file and deploy
+      uses: appleboy/ssh-action@v0.1.7
+      with:
+        host: ${{ secrets.DEV_VPS_HOST }}
+        username: ubuntu
+        key: ${{ secrets.DEV_VPS_SSH_KEY }}
+        script: |
           cd ~/component-store-api-dev
+          
+          # Crear archivo .env
+          cat > .env << EOL
+          PORT=3000
+          PAYPAL_API_CLIENT=${{ secrets.PAYPAL_API_CLIENT }}
+          PAYPAL_API_SECRET=${{ secrets.PAYPAL_API_SECRET }}
+          PAYPAL_API_URL=https://api.sandbox.paypal.com
+          HOST=http://${{ secrets.DEV_VPS_HOST }}:3001
+          JWT_SECRET=${{ secrets.JWT_SECRET }}
+          DATABASE_URL=${{ secrets.DATABASE_URL }}
+          NODE_ENV=development
+          EOL
           
           # Instalar Docker si no está instalado
           if ! command -v docker &> /dev/null; then
@@ -125,7 +124,6 @@ jobs:
           # Limpieza
           sudo docker image prune -f
           sudo docker system prune -f
-        '
     
     - name: Verify Deployment
       run: |
