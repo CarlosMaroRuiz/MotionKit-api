@@ -1,10 +1,15 @@
-name: Deploy with Git
+name: Deploy Development with Docker
 
 on:
   pull_request:
     branches: [ develop ]
     types: [opened, synchronize, reopened]
   workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to deploy (optional)'
+        required: false
+        type: string
 
 jobs:
   deploy:
@@ -16,72 +21,91 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
+      with:
+        ref: ${{ github.event.inputs.pr_number != '' && format('refs/pull/{0}/head', github.event.inputs.pr_number) || github.head_ref }}
     
-    - name: Trigger deployment via webhook
+    - name: Install dependencies
       run: |
-        # Método 1: Webhook simple
-        curl -X POST \
-          -H "Content-Type: application/json" \
-          -d '{
-            "repository": "${{ github.repository }}",
-            "branch": "${{ github.head_ref || github.ref_name }}",
-            "commit": "${{ github.sha }}",
-            "action": "deploy",
-            "environment": "development"
-          }' \
-          http://${{ secrets.DEV_VPS_HOST }}:9000/deploy || echo "Webhook method 1 attempted"
-        
-        # Método 2: Webhook alternativo
-        curl -X POST \
-          -H "X-GitHub-Event: push" \
-          -H "X-GitHub-Delivery: ${{ github.run_id }}" \
-          -d '{
-            "ref": "refs/heads/${{ github.head_ref || github.ref_name }}",
-            "repository": {
-              "clone_url": "${{ github.event.repository.clone_url }}",
-              "name": "${{ github.event.repository.name }}"
-            }
-          }' \
-          http://${{ secrets.DEV_VPS_HOST }}:8080/webhook || echo "Webhook method 2 attempted"
-        
-        # Método 3: API directa si tienes endpoint personalizado
-        curl -X POST \
-          -H "Authorization: Bearer ${{ secrets.DEPLOY_TOKEN }}" \
-          -H "Content-Type: application/json" \
-          -d '{
-            "command": "deploy",
-            "branch": "${{ github.head_ref || github.ref_name }}",
-            "env": {
-              "PAYPAL_API_CLIENT": "${{ secrets.PAYPAL_API_CLIENT }}",
-              "PAYPAL_API_SECRET": "${{ secrets.PAYPAL_API_SECRET }}",
-              "JWT_SECRET": "${{ secrets.JWT_SECRET }}",
-              "DATABASE_URL": "${{ secrets.DATABASE_URL }}"
-            }
-          }' \
-          http://${{ secrets.DEV_VPS_HOST }}:3000/api/deploy || echo "Direct API attempted"
-        
-        echo "✅ Deploy signals sent to server"
+        sudo apt-get update -qq
+        sudo apt-get install -y sshpass
     
-    - name: Wait for deployment
+    - name: Prepare deployment directory
       run: |
-        echo "⏳ Waiting for deployment to complete..."
-        sleep 60
-        
-        for i in {1..20}; do
-          echo "🔍 Checking deployment status... ($i/20)"
-          
-          # Check if app is responding
-          if curl -f -s --connect-timeout 5 http://${{ secrets.DEV_VPS_HOST }}:3001/api-docs >/dev/null 2>&1; then
-            echo "✅ Application deployed successfully!"
-            echo "🌐 Available at: http://${{ secrets.DEV_VPS_HOST }}:3001"
+        sshpass -p "${{ secrets.DEV_VPS_PASSWORD }}" ssh -o StrictHostKeyChecking=no ubuntu@${{ secrets.DEV_VPS_HOST }} '
+          mkdir -p ~/component-store-api-dev &&
+          rm -rf ~/component-store-api-dev/*
+        '
+    
+    - name: Copy project files
+      run: |
+        sshpass -p "${{ secrets.DEV_VPS_PASSWORD }}" rsync -avz \
+          -e "ssh -o StrictHostKeyChecking=no" \
+          --exclude='.git' --exclude='.github' --exclude='node_modules' \
+          ./ ubuntu@${{ secrets.DEV_VPS_HOST }}:~/component-store-api-dev/
+    
+    - name: Deploy with Docker
+      run: |
+        sshpass -p "${{ secrets.DEV_VPS_PASSWORD }}" ssh -o StrictHostKeyChecking=no ubuntu@${{ secrets.DEV_VPS_HOST }} << 'DEPLOY_SCRIPT'
+        cd ~/component-store-api-dev
+
+        # Crear archivo .env
+        cat > .env << 'ENV_FILE'
+        PORT=3000
+        PAYPAL_API_CLIENT=${{ secrets.PAYPAL_API_CLIENT }}
+        PAYPAL_API_SECRET=${{ secrets.PAYPAL_API_SECRET }}
+        PAYPAL_API_URL=https://api.sandbox.paypal.com
+        HOST=http://${{ secrets.DEV_VPS_HOST }}:3001
+        JWT_SECRET=${{ secrets.JWT_SECRET }}
+        DATABASE_URL=${{ secrets.DATABASE_URL }}
+        NODE_ENV=development
+        ENV_FILE
+
+        # Instalar Docker si no está
+        if ! command -v docker >/dev/null 2>&1; then
+          curl -fsSL https://get.docker.com -o get-docker.sh
+          sudo sh get-docker.sh
+          sudo usermod -aG docker ubuntu
+          sudo systemctl enable docker
+          sudo systemctl start docker
+        fi
+
+        # docker-compose.yml
+        cat > docker-compose.yml << 'COMPOSE_FILE'
+        version: "3.8"
+        services:
+          api-dev:
+            build: .
+            container_name: component-store-api-dev
+            restart: unless-stopped
+            ports:
+              - "3001:3000"
+            env_file:
+              - .env
+            volumes:
+              - ./src/public:/app/src/public:ro
+            command: sh -c "npx prisma migrate deploy && npm start"
+        COMPOSE_FILE
+
+        # Levantar contenedor
+        sudo docker compose down || true
+        sudo docker compose build --no-cache
+        sudo docker compose up -d
+
+        # Chequeo rápido
+        sleep 15
+        sudo docker ps | grep component-store-api-dev && echo "Container running" || echo "Container failed"
+        DEPLOY_SCRIPT
+    
+    - name: Health check
+      run: |
+        echo "Checking application health..."
+        for i in {1..6}; do
+          if curl -s http://${{ secrets.DEV_VPS_HOST }}:3001/api-docs >/dev/null; then
+            echo "Application is running successfully!"
             exit 0
           fi
-          
-          # Check deployment status endpoint if available
-          curl -s http://${{ secrets.DEV_VPS_HOST }}:9000/status 2>/dev/null || true
-          
-          sleep 15
+          echo "Attempt $i/6 - waiting..."
+          sleep 10
         done
-        
-        echo "⚠️ Deployment verification timeout reached"
-        echo "Check server logs manually or deployment may still be in progress"
+        echo "Health check failed"
+        exit 1
