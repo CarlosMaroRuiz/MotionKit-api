@@ -12,12 +12,11 @@ on:
         type: string
 
 jobs:
-  deploy-development:
+  deploy:
     runs-on: ubuntu-latest
     
     environment:
       name: development
-      url: http://${{ secrets.DEV_VPS_HOST }}:3001
     
     steps:
     - name: Checkout code
@@ -25,46 +24,41 @@ jobs:
       with:
         ref: ${{ github.event.inputs.pr_number != '' && format('refs/pull/{0}/head', github.event.inputs.pr_number) || github.head_ref }}
     
-    - name: Prepare and Deploy
-      uses: appleboy/ssh-action@v1.0.3
+    - name: Setup remote directory
+      uses: appleboy/ssh-action@v0.1.7
       with:
         host: ${{ secrets.DEV_VPS_HOST }}
         username: ubuntu
-        key: ${{ secrets.DEV_VPS_SSH_KEY }}
-        debug: true
-        script_stop: false
+        password: ${{ secrets.DEV_VPS_PASSWORD }}
+        timeout: 300s
         script: |
-          # Create and clean directory
           mkdir -p ~/component-store-api-dev
           rm -rf ~/component-store-api-dev/*
-          
-          echo "Directory prepared successfully"
+          echo "Directorio preparado correctamente"
     
-    - name: Copy Files
-      uses: appleboy/scp-action@v0.1.7
+    - name: Copy files to VPS
+      uses: appleboy/scp-action@v0.1.4
       with:
         host: ${{ secrets.DEV_VPS_HOST }}
         username: ubuntu
-        key: ${{ secrets.DEV_VPS_SSH_KEY }}
-        debug: true
-        source: "."
+        password: ${{ secrets.DEV_VPS_PASSWORD }}
+        timeout: 300s
+        source: "./"
         target: "~/component-store-api-dev/"
-        overwrite: true
-        rm: false
-        exclude: ".git,.github,node_modules"
+        rm: true
+        strip_components: 1
     
-    - name: Deploy with Docker
-      uses: appleboy/ssh-action@v1.0.3
+    - name: Create .env file and deploy
+      uses: appleboy/ssh-action@v0.1.7
       with:
         host: ${{ secrets.DEV_VPS_HOST }}
         username: ubuntu
-        key: ${{ secrets.DEV_VPS_SSH_KEY }}
-        debug: true
-        script_stop: false
+        password: ${{ secrets.DEV_VPS_PASSWORD }}
+        timeout: 600s
         script: |
           cd ~/component-store-api-dev
           
-          # Create .env file
+          echo "Creando archivo .env..."
           cat > .env << EOL
           PORT=3000
           PAYPAL_API_CLIENT=${{ secrets.PAYPAL_API_CLIENT }}
@@ -76,22 +70,27 @@ jobs:
           NODE_ENV=development
           EOL
           
-          # Install Docker if needed
+          echo "Verificando instalación de Docker..."
           if ! command -v docker &> /dev/null; then
+            echo "Instalando Docker..."
             sudo apt-get update
             sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common
             curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
             sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
             sudo apt-get update
-            sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose
+            sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
             sudo systemctl start docker
             sudo systemctl enable docker
+            sudo usermod -aG docker $USER
+            echo "Docker instalado correctamente"
+          else
+            echo "Docker ya está instalado"
           fi
           
-          # Create docker-compose file
-          cat > docker-compose.dev.yaml << 'EOL'
+          echo "Creando docker-compose.dev.yaml..."
+          cat > docker-compose.dev.yaml << "EOL"
           version: "3.8"
-
+          
           services:
             api-dev:
               build:
@@ -115,24 +114,50 @@ jobs:
               command: sh -c "npx prisma migrate deploy && npm run dev"
           EOL
           
-          # Build and run
-          sudo docker-compose -f docker-compose.dev.yaml down || true
-          sudo docker-compose -f docker-compose.dev.yaml build --no-cache
-          sudo docker-compose -f docker-compose.dev.yaml up -d
+          echo "Iniciando despliegue..."
+          # Detener contenedores existentes
+          sudo docker compose -f docker-compose.dev.yaml down 2>/dev/null || true
           
-          # Run migrations
-          sleep 15
-          sudo docker-compose -f docker-compose.dev.yaml exec -T api-dev npx prisma migrate deploy || echo "Migrations already applied"
+          # Construir y desplegar
+          echo "Construyendo imagen..."
+          sudo docker compose -f docker-compose.dev.yaml build --no-cache
           
-          # Verify deployment
-          sleep 10
-          if sudo docker ps | grep -q component-store-api-dev; then
-            echo "Container running successfully"
-          else
-            echo "Container failed to start"
-            sudo docker-compose -f docker-compose.dev.yaml logs
-          fi
+          echo "Iniciando contenedores..."
+          sudo docker compose -f docker-compose.dev.yaml up -d
           
-          # Cleanup
+          # Verificar estado
+          echo "Estado de los contenedores:"
+          sudo docker ps | grep component-store-api-dev || echo "Contenedor no encontrado"
+          
+          # Esperar a que el contenedor esté listo
+          echo "Esperando a que la aplicación esté lista..."
+          sleep 20
+          
+          # Ejecutar migraciones si es necesario
+          echo "Ejecutando migraciones..."
+          sudo docker compose -f docker-compose.dev.yaml exec -T api-dev npx prisma migrate deploy || echo "Migrations already applied or failed"
+          
+          # Limpieza de imágenes no utilizadas
+          echo "Limpiando imágenes no utilizadas..."
           sudo docker image prune -f
           sudo docker system prune -f
+          
+          echo "Despliegue completado!"
+    
+    - name: Verify Deployment
+      run: |
+        echo "Verificando que la aplicación está en funcionamiento..."
+        sleep 10
+        
+        # Intentar conectarse a la API
+        for i in {1..5}; do
+          if curl -s http://${{ secrets.DEV_VPS_HOST }}:3001/api-docs; then
+            echo "✅ Aplicación respondiendo correctamente"
+            break
+          else
+            echo "⏳ Intento $i/5 - Esperando respuesta de la aplicación..."
+            sleep 10
+          fi
+        done
+        
+        echo "📊 Verificación completada
