@@ -1,0 +1,45 @@
+name: Deploy Development via Webhook1
+
+on:
+  pull_request:
+    branches: [ develop ]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Trigger deploy webhook
+      run: |
+        echo "Sending deploy signal to VPS..."
+        curl -X POST \
+          -H "Content-Type: application/json" \
+          -H "x-deploy-token: ${{ secrets.DEPLOY_TOKEN }}" \
+          -d '{
+            "repository": "${{ github.repository }}",
+            "branch": "develop",
+            "commit": "${{ github.sha }}",
+            "environment": "development"
+          }' \
+          http://${{ secrets.DEV_VPS_HOST }}:9000/deploy
+
+    - name: Wait for deployment to start
+      run: |
+        echo "Waiting 20s for the container to start..."
+        sleep 20
+
+    - name: Health check
+      run: |
+        echo "Checking application health..."
+        for i in {1..6}; do
+          if curl -s http://${{ secrets.DEV_VPS_HOST }}:3001/api-docs >/dev/null; then
+            echo "Application is running successfully!"
+            exit 0
+          fi
+          echo "Attempt $i/6 - waiting..."
+          sleep 10
+        done
+        echo "Health check failed"
+        exit 1
