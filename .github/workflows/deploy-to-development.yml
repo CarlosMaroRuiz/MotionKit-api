@@ -104,7 +104,7 @@ jobs:
             echo "Application is running successfully!"
             exit 0
           fi
-          echo "Attempt $i/6 - waiting..."
+          echo "Attempt $i/6 - waiting...>"
           sleep 10
         done
         echo "Health check failed"
