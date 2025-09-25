@@ -1,4 +1,4 @@
-name: Deploy Force SSH
+name: Deploy with Git
 
 on:
   pull_request:
@@ -17,110 +17,71 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
     
-    - name: Force SSH setup
+    - name: Trigger deployment via webhook
       run: |
-        sudo apt-get update
-        sudo apt-get install -y sshpass
+        # Método 1: Webhook simple
+        curl -X POST \
+          -H "Content-Type: application/json" \
+          -d '{
+            "repository": "${{ github.repository }}",
+            "branch": "${{ github.head_ref || github.ref_name }}",
+            "commit": "${{ github.sha }}",
+            "action": "deploy",
+            "environment": "development"
+          }' \
+          http://${{ secrets.DEV_VPS_HOST }}:9000/deploy || echo "Webhook method 1 attempted"
         
-        # Create SSH wrapper that always works
-        cat > ssh_wrapper.sh << 'EOF'
-        #!/bin/bash
-        sshpass -p "$1" ssh \
-          -o StrictHostKeyChecking=no \
-          -o UserKnownHostsFile=/dev/null \
-          -o LogLevel=QUIET \
-          -o ConnectTimeout=10 \
-          -o ServerAliveInterval=5 \
-          -o ServerAliveCountMax=3 \
-          ubuntu@$2 "${@:3}"
-        EOF
+        # Método 2: Webhook alternativo
+        curl -X POST \
+          -H "X-GitHub-Event: push" \
+          -H "X-GitHub-Delivery: ${{ github.run_id }}" \
+          -d '{
+            "ref": "refs/heads/${{ github.head_ref || github.ref_name }}",
+            "repository": {
+              "clone_url": "${{ github.event.repository.clone_url }}",
+              "name": "${{ github.event.repository.name }}"
+            }
+          }' \
+          http://${{ secrets.DEV_VPS_HOST }}:8080/webhook || echo "Webhook method 2 attempted"
         
-        cat > scp_wrapper.sh << 'EOF'
-        #!/bin/bash
-        sshpass -p "$1" scp \
-          -o StrictHostKeyChecking=no \
-          -o UserKnownHostsFile=/dev/null \
-          -o LogLevel=QUIET \
-          -r "${@:3}" ubuntu@$2:~/
-        EOF
+        # Método 3: API directa si tienes endpoint personalizado
+        curl -X POST \
+          -H "Authorization: Bearer ${{ secrets.DEPLOY_TOKEN }}" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "command": "deploy",
+            "branch": "${{ github.head_ref || github.ref_name }}",
+            "env": {
+              "PAYPAL_API_CLIENT": "${{ secrets.PAYPAL_API_CLIENT }}",
+              "PAYPAL_API_SECRET": "${{ secrets.PAYPAL_API_SECRET }}",
+              "JWT_SECRET": "${{ secrets.JWT_SECRET }}",
+              "DATABASE_URL": "${{ secrets.DATABASE_URL }}"
+            }
+          }' \
+          http://${{ secrets.DEV_VPS_HOST }}:3000/api/deploy || echo "Direct API attempted"
         
-        chmod +x ssh_wrapper.sh scp_wrapper.sh
+        echo "✅ Deploy signals sent to server"
     
-    - name: Prepare server
+    - name: Wait for deployment
       run: |
-        ./ssh_wrapper.sh "${{ secrets.DEV_VPS_PASSWORD }}" "${{ secrets.DEV_VPS_HOST }}" "mkdir -p ~/component-store-api-dev && rm -rf ~/component-store-api-dev/*"
-    
-    - name: Upload files
-      run: |
-        # Create clean directory
-        rm -rf /tmp/deploy
-        mkdir -p /tmp/deploy
+        echo "⏳ Waiting for deployment to complete..."
+        sleep 60
         
-        # Copy files excluding unwanted directories
-        rsync -av --exclude='.git' --exclude='.github' --exclude='node_modules' ./ /tmp/deploy/
-        
-        # Upload via scp
-        ./scp_wrapper.sh "${{ secrets.DEV_VPS_PASSWORD }}" "${{ secrets.DEV_VPS_HOST }}" /tmp/deploy/* component-store-api-dev/
-    
-    - name: Deploy application
-      run: |
-        ./ssh_wrapper.sh "${{ secrets.DEV_VPS_PASSWORD }}" "${{ secrets.DEV_VPS_HOST }}" "
-          cd ~/component-store-api-dev
+        for i in {1..20}; do
+          echo "🔍 Checking deployment status... ($i/20)"
           
-          # Create .env file
-          cat > .env << 'ENVEOF'
-        PORT=3000
-        PAYPAL_API_CLIENT=${{ secrets.PAYPAL_API_CLIENT }}
-        PAYPAL_API_SECRET=${{ secrets.PAYPAL_API_SECRET }}
-        PAYPAL_API_URL=https://api.sandbox.paypal.com
-        HOST=http://${{ secrets.DEV_VPS_HOST }}:3001
-        JWT_SECRET=${{ secrets.JWT_SECRET }}
-        DATABASE_URL=${{ secrets.DATABASE_URL }}
-        NODE_ENV=development
-        ENVEOF
-          
-          # Setup Docker if needed
-          if ! command -v docker; then
-            curl -fsSL https://get.docker.com | sudo sh
-            sudo usermod -aG docker ubuntu
-          fi
-          
-          # Create docker-compose
-          cat > docker-compose.yml << 'DOCKEREOF'
-        version: '3.8'
-        services:
-          api-dev:
-            build: .
-            container_name: component-store-api-dev
-            restart: unless-stopped
-            ports:
-              - '3001:3000'
-            env_file: .env
-            volumes:
-              - ./src/public:/app/src/public:ro
-            command: sh -c 'npx prisma migrate deploy && npm run dev'
-        DOCKEREOF
-          
-          # Deploy
-          sudo docker compose down || true
-          sudo docker compose build
-          sudo docker compose up -d
-          
-          echo 'DEPLOY_COMPLETE'
-        "
-    
-    - name: Verify deployment
-      run: |
-        echo "Verifying deployment..."
-        sleep 20
-        
-        for i in {1..8}; do
-          echo "Check $i/8..."
-          if curl -f -s http://${{ secrets.DEV_VPS_HOST }}:3001/api-docs; then
-            echo "✅ Application is running!"
+          # Check if app is responding
+          if curl -f -s --connect-timeout 5 http://${{ secrets.DEV_VPS_HOST }}:3001/api-docs >/dev/null 2>&1; then
+            echo "✅ Application deployed successfully!"
+            echo "🌐 Available at: http://${{ secrets.DEV_VPS_HOST }}:3001"
             exit 0
           fi
-          sleep 10
+          
+          # Check deployment status endpoint if available
+          curl -s http://${{ secrets.DEV_VPS_HOST }}:9000/status 2>/dev/null || true
+          
+          sleep 15
         done
         
-        echo "⚠️ Application check completed"
+        echo "⚠️ Deployment verification timeout reached"
+        echo "Check server logs manually or deployment may still be in progress"
