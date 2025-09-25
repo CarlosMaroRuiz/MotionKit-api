@@ -30,11 +30,9 @@ jobs:
       with:
         host: ${{ secrets.DEV_VPS_HOST }}
         username: ubuntu
-        password: ${{ secrets.DEV_VPS_PASSWORD }}
-        key_path: ""
+        key: ${{ secrets.DEV_VPS_SSH_KEY }}
         debug: true
         script_stop: false
-        use_insecure_cipher: true
         script: |
           # Create and clean directory
           mkdir -p ~/component-store-api-dev
@@ -47,9 +45,8 @@ jobs:
       with:
         host: ${{ secrets.DEV_VPS_HOST }}
         username: ubuntu
-        password: ${{ secrets.DEV_VPS_PASSWORD }}
+        key: ${{ secrets.DEV_VPS_SSH_KEY }}
         debug: true
-        use_insecure_cipher: true
         source: "."
         target: "~/component-store-api-dev/"
         overwrite: true
@@ -61,11 +58,9 @@ jobs:
       with:
         host: ${{ secrets.DEV_VPS_HOST }}
         username: ubuntu
-        password: ${{ secrets.DEV_VPS_PASSWORD }}
-        key_path: ""
+        key: ${{ secrets.DEV_VPS_SSH_KEY }}
         debug: true
         script_stop: false
-        use_insecure_cipher: true
         script: |
           cd ~/component-store-api-dev
           
