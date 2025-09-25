@@ -15,7 +15,6 @@ jobs:
   deploy-development:
     runs-on: ubuntu-latest
     
-    # Definir una variable para el host
     env:
       SERVER_URL: http://${{ secrets.DEV_VPS_HOST }}:3001
     
@@ -29,52 +28,37 @@ jobs:
       with:
         ref: ${{ github.event.inputs.pr_number != '' && format('refs/pull/{0}/head', github.event.inputs.pr_number) || github.head_ref }}
     
-    # Paso nuevo para configurar SSH manualmente
-    - name: Setup SSH
-      run: |
-        mkdir -p ~/.ssh
-        echo "${{ secrets.DEV_VPS_SSH_KEY }}" > ~/.ssh/id_rsa
-        chmod 600 ~/.ssh/id_rsa
-        ssh-keyscan -H ${{ secrets.DEV_VPS_HOST }} >> ~/.ssh/known_hosts
-        chmod 644 ~/.ssh/known_hosts
-        echo "SSH configuration completed."
-    
-    - name: Prepare and Deploy
-      uses: appleboy/ssh-action@v1.0.3
+    - name: Deploy using SSH
+      uses: appleboy/ssh-action@master
       with:
         host: ${{ secrets.DEV_VPS_HOST }}
         username: ubuntu
         key: ${{ secrets.DEV_VPS_SSH_KEY }}
-        debug: true
-        script_stop: false
         script: |
           # Create and clean directory
           mkdir -p ~/component-store-api-dev
           rm -rf ~/component-store-api-dev/*
-          
-          echo "Directory prepared successfully"
+          echo "Directory prepared"
     
     - name: Copy Files
-      uses: appleboy/scp-action@v0.1.7
+      uses: appleboy/scp-action@master
       with:
         host: ${{ secrets.DEV_VPS_HOST }}
         username: ubuntu
         key: ${{ secrets.DEV_VPS_SSH_KEY }}
-        debug: true
         source: "."
         target: "~/component-store-api-dev/"
         overwrite: true
         rm: false
+        strip_components: 0
         exclude: ".git,.github,node_modules"
     
     - name: Deploy with Docker
-      uses: appleboy/ssh-action@v1.0.3
+      uses: appleboy/ssh-action@master
       with:
         host: ${{ secrets.DEV_VPS_HOST }}
         username: ubuntu
         key: ${{ secrets.DEV_VPS_SSH_KEY }}
-        debug: true
-        script_stop: false
         script: |
           cd ~/component-store-api-dev
           
@@ -118,12 +102,12 @@ jobs:
               environment:
                 NODE_ENV: development
                 PORT: 3000
-                DATABASE_URL: ${DATABASE_URL}
-                PAYPAL_API_CLIENT: ${PAYPAL_API_CLIENT}
-                PAYPAL_API_SECRET: ${PAYPAL_API_SECRET}
-                PAYPAL_API_URL: ${PAYPAL_API_URL}
-                HOST: ${HOST}
-                JWT_SECRET: ${JWT_SECRET}
+                DATABASE_URL: \${DATABASE_URL}
+                PAYPAL_API_CLIENT: \${PAYPAL_API_CLIENT}
+                PAYPAL_API_SECRET: \${PAYPAL_API_SECRET}
+                PAYPAL_API_URL: \${PAYPAL_API_URL}
+                HOST: \${HOST}
+                JWT_SECRET: \${JWT_SECRET}
               volumes:
                 - ./src/public:/app/src/public:ro
               command: sh -c "npx prisma migrate deploy && npm run dev"
