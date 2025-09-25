@@ -34,8 +34,9 @@ jobs:
         host: ${{ secrets.DEV_VPS_HOST }}
         username: ubuntu
         key: ${{ secrets.DEV_VPS_SSH_KEY }}
+        script_stop: false
+        ignore_known_hosts: true
         script: |
-          # Create and clean directory
           mkdir -p ~/component-store-api-dev
           rm -rf ~/component-store-api-dev/*
           echo "Directory prepared"
@@ -52,6 +53,7 @@ jobs:
         rm: false
         strip_components: 0
         exclude: ".git,.github,node_modules"
+        ignore_known_hosts: true
     
     - name: Deploy with Docker
       uses: appleboy/ssh-action@master
@@ -59,6 +61,8 @@ jobs:
         host: ${{ secrets.DEV_VPS_HOST }}
         username: ubuntu
         key: ${{ secrets.DEV_VPS_SSH_KEY }}
+        script_stop: false
+        ignore_known_hosts: true
         script: |
           cd ~/component-store-api-dev
           
