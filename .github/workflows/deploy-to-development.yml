@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       pr_number:
-        description: 'PR number to deploy (optional)'
+        description: 'PR number to deploy'
         required: false
         type: string
 
@@ -15,9 +15,13 @@ jobs:
   deploy-development:
     runs-on: ubuntu-latest
     
+  
+    env:
+      SERVER_URL: http://${{ secrets.DEV_VPS_HOST }}:3001
+    
     environment:
       name: development
-      url: http://${{ secrets.DEV_VPS_HOST }}:3001
+      url: ${{ env.SERVER_URL }}
     
     steps:
     - name: Checkout code
@@ -70,7 +74,7 @@ jobs:
           PAYPAL_API_CLIENT=${{ secrets.PAYPAL_API_CLIENT }}
           PAYPAL_API_SECRET=${{ secrets.PAYPAL_API_SECRET }}
           PAYPAL_API_URL=https://api.sandbox.paypal.com
-          HOST=http://${{ secrets.DEV_VPS_HOST }}:3001
+          HOST=${{ env.SERVER_URL }}
           JWT_SECRET=${{ secrets.JWT_SECRET }}
           DATABASE_URL=${{ secrets.DATABASE_URL }}
           NODE_ENV=development
