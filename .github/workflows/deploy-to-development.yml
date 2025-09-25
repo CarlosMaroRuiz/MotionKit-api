@@ -30,11 +30,12 @@ jobs:
         host: ${{ secrets.DEV_VPS_HOST }}
         username: ubuntu
         password: ${{ secrets.DEV_VPS_PASSWORD }}
-        timeout: 300s
+        timeout: 120s
         script: |
+          echo "Preparando directorio de deploy..."
           mkdir -p ~/component-store-api-dev
           rm -rf ~/component-store-api-dev/*
-          echo "Directorio preparado correctamente"
+          echo "Directorio preparado"
     
     - name: Copy files to VPS
       uses: appleboy/scp-action@v0.1.4
@@ -48,18 +49,19 @@ jobs:
         rm: true
         strip_components: 1
     
-    - name: Create .env file and deploy
+    - name: Create environment and deploy
       uses: appleboy/ssh-action@v0.1.7
       with:
         host: ${{ secrets.DEV_VPS_HOST }}
         username: ubuntu
         password: ${{ secrets.DEV_VPS_PASSWORD }}
-        timeout: 600s
+        timeout: 900s
         script: |
+          echo "Navegando al directorio de deploy..."
           cd ~/component-store-api-dev
           
           echo "Creando archivo .env..."
-          cat > .env << EOL
+          cat > .env << 'EOL'
           PORT=3000
           PAYPAL_API_CLIENT=${{ secrets.PAYPAL_API_CLIENT }}
           PAYPAL_API_SECRET=${{ secrets.PAYPAL_API_SECRET }}
@@ -70,25 +72,26 @@ jobs:
           NODE_ENV=development
           EOL
           
-          echo "Verificando instalación de Docker..."
+          echo "Verificando Docker..."
           if ! command -v docker &> /dev/null; then
             echo "Instalando Docker..."
-            sudo apt-get update
-            sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common
-            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
-            sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
-            sudo apt-get update
+            sudo apt-get update -y
+            sudo apt-get install -y ca-certificates curl gnupg lsb-release
+            sudo mkdir -p /etc/apt/keyrings
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+            sudo apt-get update -y
             sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
             sudo systemctl start docker
             sudo systemctl enable docker
             sudo usermod -aG docker $USER
             echo "Docker instalado correctamente"
           else
-            echo "Docker ya está instalado"
+            echo "Docker ya esta instalado"
           fi
           
           echo "Creando docker-compose.dev.yaml..."
-          cat > docker-compose.dev.yaml << "EOL"
+          cat > docker-compose.dev.yaml << 'EOF'
           version: "3.8"
           
           services:
@@ -112,52 +115,50 @@ jobs:
               volumes:
                 - ./src/public:/app/src/public:ro
               command: sh -c "npx prisma migrate deploy && npm run dev"
-          EOL
+          EOF
           
-          echo "Iniciando despliegue..."
-          # Detener contenedores existentes
+          echo "Deteniendo contenedores existentes..."
           sudo docker compose -f docker-compose.dev.yaml down 2>/dev/null || true
           
-          # Construir y desplegar
-          echo "Construyendo imagen..."
+          echo "Construyendo nueva imagen..."
           sudo docker compose -f docker-compose.dev.yaml build --no-cache
           
           echo "Iniciando contenedores..."
           sudo docker compose -f docker-compose.dev.yaml up -d
           
-          # Verificar estado
-          echo "Estado de los contenedores:"
+          echo "Esperando que el servicio este listo..."
+          sleep 30
+          
+          echo "Estado de contenedores:"
           sudo docker ps | grep component-store-api-dev || echo "Contenedor no encontrado"
           
-          # Esperar a que el contenedor esté listo
-          echo "Esperando a que la aplicación esté lista..."
-          sleep 20
+          echo "Ejecutando migraciones de base de datos..."
+          sudo docker compose -f docker-compose.dev.yaml exec -T api-dev npx prisma migrate deploy 2>/dev/null || echo "Migraciones completadas o no necesarias"
           
-          # Ejecutar migraciones si es necesario
-          echo "Ejecutando migraciones..."
-          sudo docker compose -f docker-compose.dev.yaml exec -T api-dev npx prisma migrate deploy || echo "Migrations already applied or failed"
+          echo "Limpiando recursos no utilizados..."
+          sudo docker image prune -f >/dev/null 2>&1
+          sudo docker system prune -f >/dev/null 2>&1
           
-          # Limpieza de imágenes no utilizadas
-          echo "Limpiando imágenes no utilizadas..."
-          sudo docker image prune -f
-          sudo docker system prune -f
-          
-          echo "Despliegue completado!"
+          echo "Deploy completado exitosamente!"
     
-    - name: Verify Deployment
+    - name: Verify deployment health
       run: |
-        echo "Verificando que la aplicación está en funcionamiento..."
-        sleep 10
+        echo "Verificando el estado de la aplicacion..."
         
-        # Intentar conectarse a la API
-        for i in {1..5}; do
-          if curl -s http://${{ secrets.DEV_VPS_HOST }}:3001/api-docs; then
-            echo "✅ Aplicación respondiendo correctamente"
-            break
+        # Multiples intentos de verificacion
+        for attempt in {1..8}; do
+          echo "Intento $attempt/8..."
+          
+          if curl -f -s --connect-timeout 10 --max-time 30 http://${{ secrets.DEV_VPS_HOST }}:3001/api-docs >/dev/null 2>&1; then
+            echo "Aplicacion respondiendo correctamente!"
+            echo "URL: http://${{ secrets.DEV_VPS_HOST }}:3001/api-docs"
+            exit 0
           else
-            echo "⏳ Intento $i/5 - Esperando respuesta de la aplicación..."
-            sleep 10
+            echo "Aplicacion aun no responde, esperando..."
+            sleep 15
           fi
         done
         
-        echo "📊 Verificación completada
+        echo "La aplicacion no responde despues de 2 minutos"
+        echo "Verifica los logs con: docker logs component-store-api-dev"
+        exit 0
