@@ -150,5 +150,5 @@ jobs:
         done
         
         echo "La aplicacion no responde despues de 2 minutos"
-        echo "Verifica los logs con: docker logs component-store-api-dev"
+        echo "erifica los logs con: docker logs component-store-api-dev"
         exit 0
