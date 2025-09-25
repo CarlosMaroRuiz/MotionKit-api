@@ -1,15 +1,10 @@
-name: Deploy Development Final
+name: Deploy Force SSH
 
 on:
   pull_request:
     branches: [ develop ]
     types: [opened, synchronize, reopened]
   workflow_dispatch:
-    inputs:
-      pr_number:
-        description: 'PR number to deploy (optional)'
-        required: false
-        type: string
 
 jobs:
   deploy:
@@ -21,29 +16,59 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
-      with:
-        ref: ${{ github.event.inputs.pr_number != '' && format('refs/pull/{0}/head', github.event.inputs.pr_number) || github.head_ref }}
     
-    - name: Install dependencies
+    - name: Force SSH setup
       run: |
-        sudo apt-get update -qq
+        sudo apt-get update
         sudo apt-get install -y sshpass
+        
+        # Create SSH wrapper that always works
+        cat > ssh_wrapper.sh << 'EOF'
+        #!/bin/bash
+        sshpass -p "$1" ssh \
+          -o StrictHostKeyChecking=no \
+          -o UserKnownHostsFile=/dev/null \
+          -o LogLevel=QUIET \
+          -o ConnectTimeout=10 \
+          -o ServerAliveInterval=5 \
+          -o ServerAliveCountMax=3 \
+          ubuntu@$2 "${@:3}"
+        EOF
+        
+        cat > scp_wrapper.sh << 'EOF'
+        #!/bin/bash
+        sshpass -p "$1" scp \
+          -o StrictHostKeyChecking=no \
+          -o UserKnownHostsFile=/dev/null \
+          -o LogLevel=QUIET \
+          -r "${@:3}" ubuntu@$2:~/
+        EOF
+        
+        chmod +x ssh_wrapper.sh scp_wrapper.sh
     
-    - name: Prepare deployment
+    - name: Prepare server
       run: |
-        sshpass -p "${{ secrets.DEV_VPS_PASSWORD }}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR ubuntu@${{ secrets.DEV_VPS_HOST }} 'mkdir -p ~/component-store-api-dev && rm -rf ~/component-store-api-dev/*'
+        ./ssh_wrapper.sh "${{ secrets.DEV_VPS_PASSWORD }}" "${{ secrets.DEV_VPS_HOST }}" "mkdir -p ~/component-store-api-dev && rm -rf ~/component-store-api-dev/*"
     
-    - name: Copy project files
+    - name: Upload files
       run: |
-        sshpass -p "${{ secrets.DEV_VPS_PASSWORD }}" rsync -avz -e "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR" --exclude='.git' --exclude='.github' --exclude='node_modules' ./ ubuntu@${{ secrets.DEV_VPS_HOST }}:~/component-store-api-dev/
+        # Create clean directory
+        rm -rf /tmp/deploy
+        mkdir -p /tmp/deploy
+        
+        # Copy files excluding unwanted directories
+        rsync -av --exclude='.git' --exclude='.github' --exclude='node_modules' ./ /tmp/deploy/
+        
+        # Upload via scp
+        ./scp_wrapper.sh "${{ secrets.DEV_VPS_PASSWORD }}" "${{ secrets.DEV_VPS_HOST }}" /tmp/deploy/* component-store-api-dev/
     
     - name: Deploy application
       run: |
-        sshpass -p "${{ secrets.DEV_VPS_PASSWORD }}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR ubuntu@${{ secrets.DEV_VPS_HOST }} << 'DEPLOY_SCRIPT'
-        cd ~/component-store-api-dev
-        
-        # Create environment file
-        cat > .env << 'ENV_FILE'
+        ./ssh_wrapper.sh "${{ secrets.DEV_VPS_PASSWORD }}" "${{ secrets.DEV_VPS_HOST }}" "
+          cd ~/component-store-api-dev
+          
+          # Create .env file
+          cat > .env << 'ENVEOF'
         PORT=3000
         PAYPAL_API_CLIENT=${{ secrets.PAYPAL_API_CLIENT }}
         PAYPAL_API_SECRET=${{ secrets.PAYPAL_API_SECRET }}
@@ -52,56 +77,50 @@ jobs:
         JWT_SECRET=${{ secrets.JWT_SECRET }}
         DATABASE_URL=${{ secrets.DATABASE_URL }}
         NODE_ENV=development
-        ENV_FILE
-        
-        # Install Docker if needed
-        if ! command -v docker >/dev/null 2>&1; then
-          curl -fsSL https://get.docker.com -o get-docker.sh
-          sudo sh get-docker.sh
-          sudo usermod -aG docker ubuntu
-          sudo systemctl start docker
-          sudo systemctl enable docker
-        fi
-        
-        # Create docker-compose file
-        cat > docker-compose.yml << 'COMPOSE_FILE'
-        version: "3.8"
+        ENVEOF
+          
+          # Setup Docker if needed
+          if ! command -v docker; then
+            curl -fsSL https://get.docker.com | sudo sh
+            sudo usermod -aG docker ubuntu
+          fi
+          
+          # Create docker-compose
+          cat > docker-compose.yml << 'DOCKEREOF'
+        version: '3.8'
         services:
           api-dev:
-            build:
-              context: .
-              dockerfile: Dockerfile
+            build: .
             container_name: component-store-api-dev
             restart: unless-stopped
             ports:
-              - "3001:3000"
-            env_file:
-              - .env
+              - '3001:3000'
+            env_file: .env
             volumes:
               - ./src/public:/app/src/public:ro
-            command: sh -c "npx prisma migrate deploy && npm run dev"
-        COMPOSE_FILE
-        
-        # Deploy
-        sudo docker compose down 2>/dev/null || true
-        sudo docker compose build --no-cache
-        sudo docker compose up -d
-        
-        # Wait and check
-        sleep 20
-        sudo docker ps | grep component-store-api-dev && echo "Container running" || echo "Container not found"
-        
-        DEPLOY_SCRIPT
+            command: sh -c 'npx prisma migrate deploy && npm run dev'
+        DOCKEREOF
+          
+          # Deploy
+          sudo docker compose down || true
+          sudo docker compose build
+          sudo docker compose up -d
+          
+          echo 'DEPLOY_COMPLETE'
+        "
     
-    - name: Health check
+    - name: Verify deployment
       run: |
-        echo "Checking application health..."
-        for i in {1..6}; do
-          if curl -s http://${{ secrets.DEV_VPS_HOST }}:3001/api-docs >/dev/null; then
-            echo "Application is running successfully!"
+        echo "Verifying deployment..."
+        sleep 20
+        
+        for i in {1..8}; do
+          echo "Check $i/8..."
+          if curl -f -s http://${{ secrets.DEV_VPS_HOST }}:3001/api-docs; then
+            echo "✅ Application is running!"
             exit 0
           fi
-          echo "Attempt $i/6 - waiting..."
           sleep 10
         done
-        echo "Health check completed"
+        
+        echo "⚠️ Application check completed"
