@@ -1,0 +1,55 @@
+name: Debug SSH Connection
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Test basic connectivity
+      run: |
+        echo "🔍 Probando conectividad básica..."
+        echo "Host: ${{ secrets.DEV_VPS_HOST }}"
+        
+        # Test ping
+        echo "📡 Testing ping..."
+        ping -c 3 ${{ secrets.DEV_VPS_HOST }} || echo "❌ Ping failed"
+        
+        # Test port 22
+        echo "🚪 Testing port 22..."
+        timeout 10 bash -c "</dev/tcp/${{ secrets.DEV_VPS_HOST }}/22" && echo "✅ Port 22 is open" || echo "❌ Port 22 is closed/filtered"
+        
+        # Test with nc (netcat)
+        echo "🔌 Testing with netcat..."
+        nc -zv ${{ secrets.DEV_VPS_HOST }} 22 || echo "❌ Netcat connection failed"
+        
+        # Test SSH banner
+        echo "📋 Getting SSH banner..."
+        timeout 10 ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no ubuntu@${{ secrets.DEV_VPS_HOST }} "echo 'Connection successful'" || echo "❌ SSH connection failed"
+    
+    - name: Test with sshpass (password auth)
+      run: |
+        echo "🔐 Testing password authentication..."
+        
+        # Install sshpass
+        sudo apt-get update && sudo apt-get install -y sshpass
+        
+        # Test connection with password
+        echo "🔑 Testing sshpass connection..."
+        sshpass -p "${{ secrets.DEV_VPS_PASSWORD }}" ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@${{ secrets.DEV_VPS_HOST }} "echo 'Password auth successful'; whoami; pwd" || echo "❌ Password authentication failed"
+    
+    - name: Test with appleboy action
+      uses: appleboy/ssh-action@v0.1.7
+      with:
+        host: ${{ secrets.DEV_VPS_HOST }}
+        username: ubuntu
+        password: ${{ secrets.DEV_VPS_PASSWORD }}
+        timeout: 30s
+        debug: true
+        script: |
+          echo "✅ SSH connection successful with appleboy"
+          whoami
+          pwd
+          uname -a
