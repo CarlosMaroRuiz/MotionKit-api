@@ -28,113 +28,105 @@ jobs:
       with:
         ref: ${{ github.event.inputs.pr_number != '' && format('refs/pull/{0}/head', github.event.inputs.pr_number) || github.head_ref }}
     
-    - name: Deploy using SSH
-      uses: appleboy/ssh-action@master
-      with:
-        host: ${{ secrets.DEV_VPS_HOST }}
-        username: ubuntu
-        key: ${{ secrets.DEV_VPS_SSH_KEY }}
-        script_stop: false
-        ignore_known_hosts: true
-        script: |
-          mkdir -p ~/component-store-api-dev
-          rm -rf ~/component-store-api-dev/*
-          echo "Directory prepared"
+    - name: Setup SSH Keys and known_hosts
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.DEV_VPS_SSH_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        echo "Host ${{ secrets.DEV_VPS_HOST }}" > ~/.ssh/config
+        echo "  StrictHostKeyChecking no" >> ~/.ssh/config
+        echo "  UserKnownHostsFile=/dev/null" >> ~/.ssh/config
+        chmod 600 ~/.ssh/config
+    
+    - name: Prepare and Deploy
+      run: |
+        # Verify SSH connection (verbose output for debugging)
+        ssh -v -i ~/.ssh/id_rsa ubuntu@${{ secrets.DEV_VPS_HOST }} "echo 'SSH connection successful'"
+        
+        # Prepare directory
+        ssh -i ~/.ssh/id_rsa ubuntu@${{ secrets.DEV_VPS_HOST }} "mkdir -p ~/component-store-api-dev && rm -rf ~/component-store-api-dev/*"
+        echo "Directory prepared successfully"
     
     - name: Copy Files
-      uses: appleboy/scp-action@master
-      with:
-        host: ${{ secrets.DEV_VPS_HOST }}
-        username: ubuntu
-        key: ${{ secrets.DEV_VPS_SSH_KEY }}
-        source: "."
-        target: "~/component-store-api-dev/"
-        overwrite: true
-        rm: false
-        strip_components: 0
-        exclude: ".git,.github,node_modules"
-        ignore_known_hosts: true
+      run: |
+        # Copy files using scp with StrictHostKeyChecking=no
+        scp -r -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa $(find . -type f -not -path "*/\.git/*" -not -path "*/node_modules/*" -not -path "*/\.github/*") ubuntu@${{ secrets.DEV_VPS_HOST }}:~/component-store-api-dev/
+        echo "Files copied successfully"
     
     - name: Deploy with Docker
-      uses: appleboy/ssh-action@master
-      with:
-        host: ${{ secrets.DEV_VPS_HOST }}
-        username: ubuntu
-        key: ${{ secrets.DEV_VPS_SSH_KEY }}
-        script_stop: false
-        ignore_known_hosts: true
-        script: |
-          cd ~/component-store-api-dev
-          
-          # Create .env file
-          cat > .env << EOL
-          PORT=3000
-          PAYPAL_API_CLIENT=${{ secrets.PAYPAL_API_CLIENT }}
-          PAYPAL_API_SECRET=${{ secrets.PAYPAL_API_SECRET }}
-          PAYPAL_API_URL=https://api.sandbox.paypal.com
-          HOST=${{ env.SERVER_URL }}
-          JWT_SECRET=${{ secrets.JWT_SECRET }}
-          DATABASE_URL=${{ secrets.DATABASE_URL }}
-          NODE_ENV=development
-          EOL
-          
-          # Install Docker if needed
-          if ! command -v docker &> /dev/null; then
-            sudo apt-get update
-            sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common
-            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
-            sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
-            sudo apt-get update
-            sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose
-            sudo systemctl start docker
-            sudo systemctl enable docker
-          fi
-          
-          # Create docker-compose file
-          cat > docker-compose.dev.yaml << 'EOL'
-          version: "3.8"
+      run: |
+        # Create multiline string with environment variables
+        ENV_FILE=$(cat << 'EOL'
+        PORT=3000
+        PAYPAL_API_CLIENT=${{ secrets.PAYPAL_API_CLIENT }}
+        PAYPAL_API_SECRET=${{ secrets.PAYPAL_API_SECRET }}
+        PAYPAL_API_URL=https://api.sandbox.paypal.com
+        HOST=${{ env.SERVER_URL }}
+        JWT_SECRET=${{ secrets.JWT_SECRET }}
+        DATABASE_URL=${{ secrets.DATABASE_URL }}
+        NODE_ENV=development
+        EOL
+        )
+        
+        # Create docker-compose content
+        DOCKER_COMPOSE=$(cat << 'EOL'
+        version: "3.8"
 
-          services:
-            api-dev:
-              build:
-                context: .
-                dockerfile: Dockerfile
-              container_name: component-store-api-dev
-              restart: unless-stopped
-              ports:
-                - "3001:3000"
-              environment:
-                NODE_ENV: development
-                PORT: 3000
-                DATABASE_URL: \${DATABASE_URL}
-                PAYPAL_API_CLIENT: \${PAYPAL_API_CLIENT}
-                PAYPAL_API_SECRET: \${PAYPAL_API_SECRET}
-                PAYPAL_API_URL: \${PAYPAL_API_URL}
-                HOST: \${HOST}
-                JWT_SECRET: \${JWT_SECRET}
-              volumes:
-                - ./src/public:/app/src/public:ro
-              command: sh -c "npx prisma migrate deploy && npm run dev"
-          EOL
-          
-          # Build and run
-          sudo docker-compose -f docker-compose.dev.yaml down || true
-          sudo docker-compose -f docker-compose.dev.yaml build --no-cache
-          sudo docker-compose -f docker-compose.dev.yaml up -d
-          
-          # Run migrations
-          sleep 15
-          sudo docker-compose -f docker-compose.dev.yaml exec -T api-dev npx prisma migrate deploy || echo "Migrations already applied"
-          
-          # Verify deployment
-          sleep 10
-          if sudo docker ps | grep -q component-store-api-dev; then
-            echo "Container running successfully"
-          else
-            echo "Container failed to start"
-            sudo docker-compose -f docker-compose.dev.yaml logs
-          fi
-          
-          # Cleanup
-          sudo docker image prune -f
-          sudo docker system prune -f
+        services:
+          api-dev:
+            build:
+              context: .
+              dockerfile: Dockerfile
+            container_name: component-store-api-dev
+            restart: unless-stopped
+            ports:
+              - "3001:3000"
+            environment:
+              NODE_ENV: development
+              PORT: 3000
+              DATABASE_URL: \${DATABASE_URL}
+              PAYPAL_API_CLIENT: \${PAYPAL_API_CLIENT}
+              PAYPAL_API_SECRET: \${PAYPAL_API_SECRET}
+              PAYPAL_API_URL: \${PAYPAL_API_URL}
+              HOST: \${HOST}
+              JWT_SECRET: \${JWT_SECRET}
+            volumes:
+              - ./src/public:/app/src/public:ro
+            command: sh -c "npx prisma migrate deploy && npm run dev"
+        EOL
+        )
+        
+        # Save files locally
+        echo "$ENV_FILE" > .env
+        echo "$DOCKER_COMPOSE" > docker-compose.dev.yaml
+        
+        # Copy config files
+        scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa .env ubuntu@${{ secrets.DEV_VPS_HOST }}:~/component-store-api-dev/.env
+        scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa docker-compose.dev.yaml ubuntu@${{ secrets.DEV_VPS_HOST }}:~/component-store-api-dev/docker-compose.dev.yaml
+        
+        # Execute deployment commands
+        ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ubuntu@${{ secrets.DEV_VPS_HOST }} "cd ~/component-store-api-dev && \
+          if ! command -v docker &> /dev/null; then \
+            sudo apt-get update && \
+            sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common && \
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add - && \
+            sudo add-apt-repository \"deb [arch=amd64] https://download.docker.com/linux/ubuntu \$(lsb_release -cs) stable\" && \
+            sudo apt-get update && \
+            sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose && \
+            sudo systemctl start docker && \
+            sudo systemctl enable docker; \
+          fi && \
+          sudo docker-compose -f docker-compose.dev.yaml down || true && \
+          sudo docker-compose -f docker-compose.dev.yaml build --no-cache && \
+          sudo docker-compose -f docker-compose.dev.yaml up -d && \
+          sleep 15 && \
+          sudo docker-compose -f docker-compose.dev.yaml exec -T api-dev npx prisma migrate deploy || echo \"Migrations already applied\" && \
+          sleep 10 && \
+          if sudo docker ps | grep -q component-store-api-dev; then \
+            echo \"Container running successfully\"; \
+          else \
+            echo \"Container failed to start\"; \
+            sudo docker-compose -f docker-compose.dev.yaml logs; \
+          fi && \
+          sudo docker image prune -f && \
+          sudo docker system prune -f"
