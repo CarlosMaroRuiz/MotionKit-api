@@ -18,6 +18,7 @@ jobs:
     environment:
       name: development
     
+    
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
@@ -29,29 +30,20 @@ jobs:
       with:
         ssh-private-key: ${{ secrets.DEV_VPS_SSH_KEY }}
     
-    # En lugar de ssh-keyscan, configuramos directamente para ignorar verificación de host
-    - name: Configure SSH
-      run: |
-        mkdir -p ~/.ssh
-        echo "Host ${{ secrets.DEV_VPS_HOST }}" > ~/.ssh/config
-        echo "  StrictHostKeyChecking no" >> ~/.ssh/config
-        echo "  UserKnownHostsFile=/dev/null" >> ~/.ssh/config
-        chmod 600 ~/.ssh/config
-    
     - name: Setup remote directory
       run: |
-        ssh ubuntu@${{ secrets.DEV_VPS_HOST }} '
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@${{ secrets.DEV_VPS_HOST }} '
           mkdir -p ~/component-store-api-dev
           rm -rf ~/component-store-api-dev/*
         '
     
     - name: Copy files to VPS
       run: |
-        rsync -avz --exclude='.git' --exclude='.github' --exclude='node_modules' ./ ubuntu@${{ secrets.DEV_VPS_HOST }}:~/component-store-api-dev/
+        rsync -e "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" -avz --exclude='.git' --exclude='.github' --exclude='node_modules' ./ ubuntu@${{ secrets.DEV_VPS_HOST }}:~/component-store-api-dev/
     
     - name: Create .env file
       run: |
-        ssh ubuntu@${{ secrets.DEV_VPS_HOST }} '
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@${{ secrets.DEV_VPS_HOST }} '
           cat > ~/component-store-api-dev/.env << EOL
         PORT=3000
         PAYPAL_API_CLIENT=${{ secrets.PAYPAL_API_CLIENT }}
@@ -66,7 +58,7 @@ jobs:
     
     - name: Install Docker and deploy
       run: |
-        ssh ubuntu@${{ secrets.DEV_VPS_HOST }} '
+        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@${{ secrets.DEV_VPS_HOST }} '
           cd ~/component-store-api-dev
           
           # Instalar Docker si no está instalado
