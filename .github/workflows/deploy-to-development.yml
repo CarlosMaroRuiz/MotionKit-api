@@ -18,7 +18,6 @@ jobs:
     environment:
       name: development
     
-    
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
@@ -30,20 +29,27 @@ jobs:
       with:
         ssh-private-key: ${{ secrets.DEV_VPS_SSH_KEY }}
     
+    # Agregar el host key al known_hosts
+    - name: Add host key to known hosts
+      run: |
+        mkdir -p ~/.ssh
+        ssh-keyscan -H ${{ secrets.DEV_VPS_HOST }} >> ~/.ssh/known_hosts
+        chmod 600 ~/.ssh/known_hosts
+    
     - name: Setup remote directory
       run: |
-        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@${{ secrets.DEV_VPS_HOST }} '
+        ssh ubuntu@${{ secrets.DEV_VPS_HOST }} '
           mkdir -p ~/component-store-api-dev
           rm -rf ~/component-store-api-dev/*
         '
     
     - name: Copy files to VPS
       run: |
-        rsync -e "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" -avz --exclude='.git' --exclude='.github' --exclude='node_modules' ./ ubuntu@${{ secrets.DEV_VPS_HOST }}:~/component-store-api-dev/
+        rsync -avz --exclude='.git' --exclude='.github' --exclude='node_modules' ./ ubuntu@${{ secrets.DEV_VPS_HOST }}:~/component-store-api-dev/
     
     - name: Create .env file
       run: |
-        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@${{ secrets.DEV_VPS_HOST }} '
+        ssh ubuntu@${{ secrets.DEV_VPS_HOST }} '
           cat > ~/component-store-api-dev/.env << EOL
         PORT=3000
         PAYPAL_API_CLIENT=${{ secrets.PAYPAL_API_CLIENT }}
@@ -58,7 +64,7 @@ jobs:
     
     - name: Install Docker and deploy
       run: |
-        ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ubuntu@${{ secrets.DEV_VPS_HOST }} '
+        ssh ubuntu@${{ secrets.DEV_VPS_HOST }} '
           cd ~/component-store-api-dev
           
           # Instalar Docker si no está instalado
@@ -72,6 +78,7 @@ jobs:
             sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose
             sudo systemctl start docker
             sudo systemctl enable docker
+            sudo usermod -aG docker $USER
           fi
           
           # Crear docker-compose.dev.yaml
