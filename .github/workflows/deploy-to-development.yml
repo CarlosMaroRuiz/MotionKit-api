@@ -1,4 +1,4 @@
-name: Deploy Development via Webhook
+name: Deploy to Dev EC2 with Dockerfile
 
 on:
   pull_request:
@@ -9,37 +9,156 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
+    
     steps:
-    - name: Trigger deploy webhook
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Setup SSH
+      uses: webfactory/ssh-agent@v0.7.0
+      with:
+        ssh-private-key: ${{ secrets.EC2_SSH_KEY_DEV }}
+    
+    - name: Add host key to known hosts
       run: |
-        echo "Sending deploy signal to VPS..."
-        curl -X POST \
-          -H "Content-Type: application/json" \
-          -H "x-deploy-token: ${{ secrets.DEPLOY_TOKEN }}" \
-          -d '{
-            "repository": "${{ github.repository }}",
-            "branch": "develop",
-            "commit": "${{ github.sha }}",
-            "environment": "development"
-          }' \
-          http://${{ secrets.DEV_VPS_HOST }}:9000/deploy
-
-    - name: Wait for deployment to start
+        mkdir -p ~/.ssh
+        ssh-keyscan ${{ secrets.EC2_HOST_DEV }} >> ~/.ssh/known_hosts
+    
+    - name: Setup remote directory
       run: |
-        echo "Waiting 20s for the container to start..."
-        sleep 20
-
-    - name: Health check
-      run: |
-        echo "Checking application health..."
-        for i in {1..6}; do
-          if curl -s http://${{ secrets.DEV_VPS_HOST }}:3001/api-docs >/dev/null; then
-            echo "Application is running successfully!"
-            exit 0
+        ssh ${{ secrets.EC2_USERNAME_DEV }}@${{ secrets.EC2_HOST_DEV }} '
+          if [ ! -d "~/component-store-api" ]; then
+            mkdir -p ~/component-store-api
           fi
-          echo "Attempt $i/6 - waiting..."
-          sleep 10
-        done
-        echo "Health check failed"
-        exit 1
+        '
+    
+    - name: Copy files to EC2
+      run: |
+        rsync -avz --exclude='.git' --exclude='.github' --exclude='node_modules' ./ ${{ secrets.EC2_USERNAME_DEV }}@${{ secrets.EC2_HOST_DEV }}:~/component-store-api/
+    
+    - name: Create .env file
+      run: |
+        ssh ${{ secrets.EC2_USERNAME_DEV }}@${{ secrets.EC2_HOST_DEV }} '
+          cat > ~/component-store-api/.env << EOL
+        PORT=3000
+        PAYPAL_API_CLIENT=${{ secrets.PAYPAL_API_CLIENT }}
+        PAYPAL_API_SECRET=${{ secrets.PAYPAL_API_SECRET }}
+        PAYPAL_API_URL=https://api.sandbox.paypal.com
+        HOST=http://${{ secrets.EC2_HOST_DEV }}:3000
+        JWT_SECRET=${{ secrets.JWT_SECRET }}
+        DATABASE_URL=${{ secrets.DATABASE_URL }}
+        EOL
+        '
+    
+    - name: Install Docker and deploy
+      run: |
+        ssh ${{ secrets.EC2_USERNAME_DEV }}@${{ secrets.EC2_HOST_DEV }} '
+          cd ~/component-store-api
+          
+          # Detectar sistema operativo y instalar Docker en consecuencia
+          if [ -f /etc/os-release ]; then
+            . /etc/os-release
+            echo "Sistema operativo detectado: $NAME"
+            
+            if [[ "$NAME" == *"Ubuntu"* ]] || [[ "$NAME" == *"Debian"* ]]; then
+              echo "Instalando Docker en Ubuntu/Debian..."
+              
+              # Actualizar paquetes
+              sudo apt-get update
+              
+              # Instalar paquetes necesarios
+              sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common
+              
+              # Agregar clave GPG oficial de Docker
+              curl -fsSL https://download.docker.com/linux/$ID/gpg | sudo apt-key add -
+              
+              # Configurar repositorio estable
+              sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/$ID $(lsb_release -cs) stable"
+              
+              # Actualizar índice de paquetes
+              sudo apt-get update
+              
+              # Instalar Docker CE
+              sudo apt-get install -y docker-ce docker-ce-cli containerd.io
+              
+              # Iniciar y habilitar Docker
+              sudo systemctl start docker
+              sudo systemctl enable docker
+              
+              # Agregar usuario actual al grupo docker
+              sudo usermod -aG docker $USER
+              
+              # Instalar Docker Compose
+              sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+              sudo chmod +x /usr/local/bin/docker-compose
+              
+              echo "Docker instalado correctamente"
+            elif [[ "$NAME" == *"Amazon Linux"* ]]; then
+              echo "Instalando Docker en Amazon Linux..."
+              sudo yum update -y
+              sudo amazon-linux-extras install docker -y
+              sudo systemctl start docker
+              sudo systemctl enable docker
+              sudo usermod -a -G docker $USER
+            else
+              echo "Sistema operativo no reconocido: $NAME"
+              echo "Intentando instalación genérica de Docker..."
+              
+              # Intento genérico para otras distribuciones
+              curl -fsSL https://get.docker.com -o get-docker.sh
+              sudo sh get-docker.sh
+              sudo systemctl start docker
+              sudo systemctl enable docker
+              sudo usermod -aG docker $USER
+            fi
+          else
+            echo "No se pudo detectar el sistema operativo"
+            exit 1
+          fi
+          
+          # Verificar instalación de Docker
+          echo "Verificando instalación de Docker..."
+          docker --version || echo "Error: Docker no se instaló correctamente"
+          docker-compose --version || echo "Error: Docker Compose no se instaló correctamente"
+          
+          # Verificar que el Dockerfile existe
+          if [ ! -f "Dockerfile" ]; then
+            echo "Error: Dockerfile no encontrado en el directorio"
+            exit 1
+          fi
+          
+          echo "Contenido del Dockerfile:"
+          cat Dockerfile
+          
+          echo "Contenido del docker-compose.yaml:"
+          cat docker-compose.yaml
+          
+          # Usar sudo para ejecutar comandos Docker
+          echo "Construyendo imagen desde el Dockerfile..."
+          sudo docker-compose build --no-cache
+          
+          # Ejecutar/actualizar la aplicación
+          echo "Deteniendo contenedores existentes..."
+          sudo docker-compose down
+          
+          echo "Iniciando contenedores con nueva imagen..."
+          sudo docker-compose up -d
+          
+          # Verificar estado
+          echo "Estado de los contenedores:"
+          sudo docker ps
+          
+          # Mostrar logs iniciales
+          echo "Logs del contenedor:"
+          sudo docker-compose logs api --tail=50
+          
+          # Ejecutar migraciones de base de datos si es necesario
+          sleep 10  # Esperar a que los contenedores estén listos
+          sudo docker-compose exec -T api npx prisma migrate deploy
+        '
+    
+    - name: Verify Deployment
+      run: |
+        echo "Verificando que la aplicación está en funcionamiento..."
+        sleep 15  # Dar tiempo para que la aplicación arranque completamente
+        curl -s http://${{ secrets.EC2_HOST_DEV }}:3000/api-docs || echo "La aplicación aún no responde. Puede ser necesario revisar los logs."
