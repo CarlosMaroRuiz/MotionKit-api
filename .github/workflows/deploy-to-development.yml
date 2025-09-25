@@ -1,4 +1,4 @@
-name: Deploy to Development Server
+name: Deploy Development Final
 
 on:
   pull_request:
@@ -24,34 +24,26 @@ jobs:
       with:
         ref: ${{ github.event.inputs.pr_number != '' && format('refs/pull/{0}/head', github.event.inputs.pr_number) || github.head_ref }}
     
-    - name: Install sshpass and setup
+    - name: Install dependencies
       run: |
-        sudo apt-get update && sudo apt-get install -y sshpass
-        echo "sshpass instalado correctamente"
+        sudo apt-get update -qq
+        sudo apt-get install -y sshpass
     
-    - name: Setup remote directory
+    - name: Prepare deployment
       run: |
-        sshpass -p "${{ secrets.DEV_VPS_PASSWORD }}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR ubuntu@${{ secrets.DEV_VPS_HOST }} '
-          echo "Preparando directorio de deploy..."
-          mkdir -p ~/component-store-api-dev
-          rm -rf ~/component-store-api-dev/*
-          echo "Directorio preparado"
-        '
+        sshpass -p "${{ secrets.DEV_VPS_PASSWORD }}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR ubuntu@${{ secrets.DEV_VPS_HOST }} 'mkdir -p ~/component-store-api-dev && rm -rf ~/component-store-api-dev/*'
     
-    - name: Copy files to VPS
+    - name: Copy project files
       run: |
-        echo "Copiando archivos al servidor..."
         sshpass -p "${{ secrets.DEV_VPS_PASSWORD }}" rsync -avz -e "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR" --exclude='.git' --exclude='.github' --exclude='node_modules' ./ ubuntu@${{ secrets.DEV_VPS_HOST }}:~/component-store-api-dev/
-        echo "Archivos copiados correctamente"
     
-    - name: Create environment and deploy
+    - name: Deploy application
       run: |
-        sshpass -p "${{ secrets.DEV_VPS_PASSWORD }}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR ubuntu@${{ secrets.DEV_VPS_HOST }} '
-          echo "Navegando al directorio de deploy..."
-          cd ~/component-store-api-dev
-          
-          echo "Creando archivo .env..."
-          cat > .env << "EOL"
+        sshpass -p "${{ secrets.DEV_VPS_PASSWORD }}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR ubuntu@${{ secrets.DEV_VPS_HOST }} << 'DEPLOY_SCRIPT'
+        cd ~/component-store-api-dev
+        
+        # Create environment file
+        cat > .env << 'ENV_FILE'
         PORT=3000
         PAYPAL_API_CLIENT=${{ secrets.PAYPAL_API_CLIENT }}
         PAYPAL_API_SECRET=${{ secrets.PAYPAL_API_SECRET }}
@@ -60,30 +52,20 @@ jobs:
         JWT_SECRET=${{ secrets.JWT_SECRET }}
         DATABASE_URL=${{ secrets.DATABASE_URL }}
         NODE_ENV=development
-        EOL
-          
-          echo "Verificando Docker..."
-          if ! command -v docker &> /dev/null; then
-            echo "Instalando Docker..."
-            sudo apt-get update -y
-            sudo apt-get install -y ca-certificates curl gnupg lsb-release
-            sudo mkdir -p /etc/apt/keyrings
-            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-            sudo apt-get update -y
-            sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
-            sudo systemctl start docker
-            sudo systemctl enable docker
-            sudo usermod -aG docker $USER
-            echo "Docker instalado correctamente"
-          else
-            echo "Docker ya esta instalado"
-          fi
-          
-          echo "Creando docker-compose.dev.yaml..."
-          cat > docker-compose.dev.yaml << "EOF"
-        version: "3.8"
+        ENV_FILE
         
+        # Install Docker if needed
+        if ! command -v docker >/dev/null 2>&1; then
+          curl -fsSL https://get.docker.com -o get-docker.sh
+          sudo sh get-docker.sh
+          sudo usermod -aG docker ubuntu
+          sudo systemctl start docker
+          sudo systemctl enable docker
+        fi
+        
+        # Create docker-compose file
+        cat > docker-compose.yml << 'COMPOSE_FILE'
+        version: "3.8"
         services:
           api-dev:
             build:
@@ -93,62 +75,33 @@ jobs:
             restart: unless-stopped
             ports:
               - "3001:3000"
-            environment:
-              NODE_ENV: development
-              PORT: 3000
-              DATABASE_URL: ${DATABASE_URL}
-              PAYPAL_API_CLIENT: ${PAYPAL_API_CLIENT}
-              PAYPAL_API_SECRET: ${PAYPAL_API_SECRET}
-              PAYPAL_API_URL: ${PAYPAL_API_URL}
-              HOST: ${HOST}
-              JWT_SECRET: ${JWT_SECRET}
+            env_file:
+              - .env
             volumes:
               - ./src/public:/app/src/public:ro
             command: sh -c "npx prisma migrate deploy && npm run dev"
-        EOF
-          
-          echo "Deteniendo contenedores existentes..."
-          sudo docker compose -f docker-compose.dev.yaml down 2>/dev/null || true
-          
-          echo "Construyendo nueva imagen..."
-          sudo docker compose -f docker-compose.dev.yaml build --no-cache
-          
-          echo "Iniciando contenedores..."
-          sudo docker compose -f docker-compose.dev.yaml up -d
-          
-          echo "Esperando que el servicio este listo..."
-          sleep 30
-          
-          echo "Estado de contenedores:"
-          sudo docker ps | grep component-store-api-dev || echo "Contenedor no encontrado"
-          
-          echo "Ejecutando migraciones de base de datos..."
-          sudo docker compose -f docker-compose.dev.yaml exec -T api-dev npx prisma migrate deploy 2>/dev/null || echo "Migraciones completadas o no necesarias"
-          
-          echo "Limpiando recursos no utilizados..."
-          sudo docker image prune -f >/dev/null 2>&1
-          sudo docker system prune -f >/dev/null 2>&1
-          
-          echo "Deploy completado exitosamente!"
-        '
+        COMPOSE_FILE
+        
+        # Deploy
+        sudo docker compose down 2>/dev/null || true
+        sudo docker compose build --no-cache
+        sudo docker compose up -d
+        
+        # Wait and check
+        sleep 20
+        sudo docker ps | grep component-store-api-dev && echo "Container running" || echo "Container not found"
+        
+        DEPLOY_SCRIPT
     
-    - name: Verify deployment health
+    - name: Health check
       run: |
-        echo "Verificando el estado de la aplicacion..."
-        
-        for attempt in {1..8}; do
-          echo "Intento $attempt/8..."
-          
-          if curl -f -s --connect-timeout 10 --max-time 30 http://${{ secrets.DEV_VPS_HOST }}:3001/api-docs >/dev/null 2>&1; then
-            echo "Aplicacion respondiendo correctamente!"
-            echo "URL: http://${{ secrets.DEV_VPS_HOST }}:3001/api-docs"
+        echo "Checking application health..."
+        for i in {1..6}; do
+          if curl -s http://${{ secrets.DEV_VPS_HOST }}:3001/api-docs >/dev/null; then
+            echo "Application is running successfully!"
             exit 0
-          else
-            echo "Aplicacion aun no responde, esperando..."
-            sleep 15
           fi
+          echo "Attempt $i/6 - waiting..."
+          sleep 10
         done
-        
-        echo "La aplicacion no responde despues de 2 minutos"
-        echo "erifica los logs con: docker logs component-store-api-dev"
-        exit 0
+        echo "Health check completed"
