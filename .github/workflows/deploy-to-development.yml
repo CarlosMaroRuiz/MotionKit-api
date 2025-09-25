@@ -24,53 +24,43 @@ jobs:
       with:
         ref: ${{ github.event.inputs.pr_number != '' && format('refs/pull/{0}/head', github.event.inputs.pr_number) || github.head_ref }}
     
+    - name: Install sshpass and setup
+      run: |
+        sudo apt-get update && sudo apt-get install -y sshpass
+        echo "sshpass instalado correctamente"
+    
     - name: Setup remote directory
-      uses: appleboy/ssh-action@v0.1.7
-      with:
-        host: ${{ secrets.DEV_VPS_HOST }}
-        username: ubuntu
-        password: ${{ secrets.DEV_VPS_PASSWORD }}
-        timeout: 120s
-        script: |
+      run: |
+        sshpass -p "${{ secrets.DEV_VPS_PASSWORD }}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR ubuntu@${{ secrets.DEV_VPS_HOST }} '
           echo "Preparando directorio de deploy..."
           mkdir -p ~/component-store-api-dev
           rm -rf ~/component-store-api-dev/*
           echo "Directorio preparado"
+        '
     
     - name: Copy files to VPS
-      uses: appleboy/scp-action@v0.1.4
-      with:
-        host: ${{ secrets.DEV_VPS_HOST }}
-        username: ubuntu
-        password: ${{ secrets.DEV_VPS_PASSWORD }}
-        timeout: 300s
-        source: "./"
-        target: "~/component-store-api-dev/"
-        rm: true
-        strip_components: 1
+      run: |
+        echo "Copiando archivos al servidor..."
+        sshpass -p "${{ secrets.DEV_VPS_PASSWORD }}" rsync -avz -e "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR" --exclude='.git' --exclude='.github' --exclude='node_modules' ./ ubuntu@${{ secrets.DEV_VPS_HOST }}:~/component-store-api-dev/
+        echo "Archivos copiados correctamente"
     
     - name: Create environment and deploy
-      uses: appleboy/ssh-action@v0.1.7
-      with:
-        host: ${{ secrets.DEV_VPS_HOST }}
-        username: ubuntu
-        password: ${{ secrets.DEV_VPS_PASSWORD }}
-        timeout: 900s
-        script: |
+      run: |
+        sshpass -p "${{ secrets.DEV_VPS_PASSWORD }}" ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR ubuntu@${{ secrets.DEV_VPS_HOST }} '
           echo "Navegando al directorio de deploy..."
           cd ~/component-store-api-dev
           
           echo "Creando archivo .env..."
-          cat > .env << 'EOL'
-          PORT=3000
-          PAYPAL_API_CLIENT=${{ secrets.PAYPAL_API_CLIENT }}
-          PAYPAL_API_SECRET=${{ secrets.PAYPAL_API_SECRET }}
-          PAYPAL_API_URL=https://api.sandbox.paypal.com
-          HOST=http://${{ secrets.DEV_VPS_HOST }}:3001
-          JWT_SECRET=${{ secrets.JWT_SECRET }}
-          DATABASE_URL=${{ secrets.DATABASE_URL }}
-          NODE_ENV=development
-          EOL
+          cat > .env << "EOL"
+        PORT=3000
+        PAYPAL_API_CLIENT=${{ secrets.PAYPAL_API_CLIENT }}
+        PAYPAL_API_SECRET=${{ secrets.PAYPAL_API_SECRET }}
+        PAYPAL_API_URL=https://api.sandbox.paypal.com
+        HOST=http://${{ secrets.DEV_VPS_HOST }}:3001
+        JWT_SECRET=${{ secrets.JWT_SECRET }}
+        DATABASE_URL=${{ secrets.DATABASE_URL }}
+        NODE_ENV=development
+        EOL
           
           echo "Verificando Docker..."
           if ! command -v docker &> /dev/null; then
@@ -91,31 +81,31 @@ jobs:
           fi
           
           echo "Creando docker-compose.dev.yaml..."
-          cat > docker-compose.dev.yaml << 'EOF'
-          version: "3.8"
-          
-          services:
-            api-dev:
-              build:
-                context: .
-                dockerfile: Dockerfile
-              container_name: component-store-api-dev
-              restart: unless-stopped
-              ports:
-                - "3001:3000"
-              environment:
-                NODE_ENV: development
-                PORT: 3000
-                DATABASE_URL: ${DATABASE_URL}
-                PAYPAL_API_CLIENT: ${PAYPAL_API_CLIENT}
-                PAYPAL_API_SECRET: ${PAYPAL_API_SECRET}
-                PAYPAL_API_URL: ${PAYPAL_API_URL}
-                HOST: ${HOST}
-                JWT_SECRET: ${JWT_SECRET}
-              volumes:
-                - ./src/public:/app/src/public:ro
-              command: sh -c "npx prisma migrate deploy && npm run dev"
-          EOF
+          cat > docker-compose.dev.yaml << "EOF"
+        version: "3.8"
+        
+        services:
+          api-dev:
+            build:
+              context: .
+              dockerfile: Dockerfile
+            container_name: component-store-api-dev
+            restart: unless-stopped
+            ports:
+              - "3001:3000"
+            environment:
+              NODE_ENV: development
+              PORT: 3000
+              DATABASE_URL: ${DATABASE_URL}
+              PAYPAL_API_CLIENT: ${PAYPAL_API_CLIENT}
+              PAYPAL_API_SECRET: ${PAYPAL_API_SECRET}
+              PAYPAL_API_URL: ${PAYPAL_API_URL}
+              HOST: ${HOST}
+              JWT_SECRET: ${JWT_SECRET}
+            volumes:
+              - ./src/public:/app/src/public:ro
+            command: sh -c "npx prisma migrate deploy && npm run dev"
+        EOF
           
           echo "Deteniendo contenedores existentes..."
           sudo docker compose -f docker-compose.dev.yaml down 2>/dev/null || true
@@ -140,12 +130,12 @@ jobs:
           sudo docker system prune -f >/dev/null 2>&1
           
           echo "Deploy completado exitosamente!"
+        '
     
     - name: Verify deployment health
       run: |
         echo "Verificando el estado de la aplicacion..."
         
-        # Multiples intentos de verificacion
         for attempt in {1..8}; do
           echo "Intento $attempt/8..."
           
